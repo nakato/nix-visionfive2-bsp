@@ -1,0 +1,24 @@
+From 318cc585a4475e5e12594ba6906cb3eda5cf76cf Mon Sep 17 00:00:00 2001
+From: Emil Renner Berthing <kernel@esmil.dk>
+Date: Tue, 21 Feb 2023 10:46:28 +0800
+Subject: [PATCH 02/33] clk: starfive: Rename clk-starfive-jh7100.h to
+ clk-starfive-jh71x0.h
+
+Rename clk-starfive-jh7100.h to clk-starfive-jh71x0.h for making
+the code to be common.
+
+Reviewed-by: Conor Dooley <conor.dooley@microchip.com>
+Signed-off-by: Emil Renner Berthing <kernel@esmil.dk>
+Signed-off-by: Hal Feng <hal.feng@starfivetech.com>
+---
+ .../clk/starfive/{clk-starfive-jh7100.h => clk-starfive-jh71x0.h} | 0
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+ rename drivers/clk/starfive/{clk-starfive-jh7100.h => clk-starfive-jh71x0.h} (100%)
+
+diff --git a/drivers/clk/starfive/clk-starfive-jh7100.h b/drivers/clk/starfive/clk-starfive-jh71x0.h
+similarity index 100%
+rename from drivers/clk/starfive/clk-starfive-jh7100.h
+rename to drivers/clk/starfive/clk-starfive-jh71x0.h
+-- 
+2.39.1
+

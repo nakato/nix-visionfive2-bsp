@@ -1,0 +1,31 @@
+From 7d572bb78a53c938f7026d1fb7efe2d2f52f2947 Mon Sep 17 00:00:00 2001
+From: Emil Renner Berthing <kernel@esmil.dk>
+Date: Tue, 21 Feb 2023 10:46:41 +0800
+Subject: [PATCH 15/33] dt-bindings: interrupt-controller: Add StarFive JH7110
+ plic
+
+Add compatible string for StarFive JH7110 plic.
+
+Reviewed-by: Conor Dooley <conor.dooley@microchip.com>
+Acked-by: Krzysztof Kozlowski <krzysztof.kozlowski@linaro.org>
+Signed-off-by: Emil Renner Berthing <kernel@esmil.dk>
+Signed-off-by: Hal Feng <hal.feng@starfivetech.com>
+---
+ .../bindings/interrupt-controller/sifive,plic-1.0.0.yaml         | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Documentation/devicetree/bindings/interrupt-controller/sifive,plic-1.0.0.yaml b/Documentation/devicetree/bindings/interrupt-controller/sifive,plic-1.0.0.yaml
+index 63bc89e13480..4e98261f2948 100644
+--- a/Documentation/devicetree/bindings/interrupt-controller/sifive,plic-1.0.0.yaml
++++ b/Documentation/devicetree/bindings/interrupt-controller/sifive,plic-1.0.0.yaml
+@@ -59,6 +59,7 @@ properties:
+           - enum:
+               - sifive,fu540-c000-plic
+               - starfive,jh7100-plic
++              - starfive,jh7110-plic
+               - canaan,k210-plic
+           - const: sifive,plic-1.0.0
+       - items:
+-- 
+2.39.1
+

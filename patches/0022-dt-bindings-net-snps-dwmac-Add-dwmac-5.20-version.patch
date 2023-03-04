@@ -1,0 +1,53 @@
+From 502019fa9e77eaade6b6e253740a47cb77e8ee4b Mon Sep 17 00:00:00 2001
+From: Emil Renner Berthing <kernel@esmil.dk>
+Date: Fri, 3 Mar 2023 16:59:17 +0800
+Subject: [PATCH 22/33] dt-bindings: net: snps,dwmac: Add dwmac-5.20 version
+
+Add dwmac-5.20 IP version to snps.dwmac.yaml
+
+Signed-off-by: Emil Renner Berthing <kernel@esmil.dk>
+Signed-off-by: Samin Guo <samin.guo@starfivetech.com>
+Acked-by: Krzysztof Kozlowski <krzysztof.kozlowski@linaro.org>
+---
+ Documentation/devicetree/bindings/net/snps,dwmac.yaml | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/net/snps,dwmac.yaml b/Documentation/devicetree/bindings/net/snps,dwmac.yaml
+index 16b7d2904696..01b056ab71f7 100644
+--- a/Documentation/devicetree/bindings/net/snps,dwmac.yaml
++++ b/Documentation/devicetree/bindings/net/snps,dwmac.yaml
+@@ -30,6 +30,7 @@ select:
+           - snps,dwmac-4.10a
+           - snps,dwmac-4.20a
+           - snps,dwmac-5.10a
++          - snps,dwmac-5.20
+           - snps,dwxgmac
+           - snps,dwxgmac-2.10
+ 
+@@ -87,6 +88,7 @@ properties:
+         - snps,dwmac-4.10a
+         - snps,dwmac-4.20a
+         - snps,dwmac-5.10a
++        - snps,dwmac-5.20
+         - snps,dwxgmac
+         - snps,dwxgmac-2.10
+ 
+@@ -575,6 +577,7 @@ allOf:
+               - snps,dwmac-3.50a
+               - snps,dwmac-4.10a
+               - snps,dwmac-4.20a
++              - snps,dwmac-5.20
+               - snps,dwxgmac
+               - snps,dwxgmac-2.10
+               - st,spear600-gmac
+@@ -629,6 +632,7 @@ allOf:
+               - snps,dwmac-4.10a
+               - snps,dwmac-4.20a
+               - snps,dwmac-5.10a
++              - snps,dwmac-5.20
+               - snps,dwxgmac
+               - snps,dwxgmac-2.10
+               - st,spear600-gmac
+-- 
+2.39.1
+

@@ -1,0 +1,133 @@
+From 2d0ca2eefc3295f1a00be17233af2b5fe3da86b6 Mon Sep 17 00:00:00 2001
+From: Hal Feng <hal.feng@starfivetech.com>
+Date: Tue, 21 Feb 2023 10:46:39 +0800
+Subject: [PATCH 13/33] reset: starfive: Add StarFive JH7110 reset driver
+
+Add auxiliary driver to support StarFive JH7110 system
+and always-on resets.
+
+Reported-by: kernel test robot <lkp@intel.com>
+Signed-off-by: Hal Feng <hal.feng@starfivetech.com>
+---
+ drivers/reset/starfive/Kconfig                |  8 +++
+ drivers/reset/starfive/Makefile               |  1 +
+ .../reset/starfive/reset-starfive-jh7110.c    | 64 +++++++++++++++++++
+ .../reset/starfive/reset-starfive-jh71x0.h    |  6 ++
+ 4 files changed, 79 insertions(+)
+ create mode 100644 drivers/reset/starfive/reset-starfive-jh7110.c
+
+diff --git a/drivers/reset/starfive/Kconfig b/drivers/reset/starfive/Kconfig
+index 9d15c4110e40..fab1a081af17 100644
+--- a/drivers/reset/starfive/Kconfig
++++ b/drivers/reset/starfive/Kconfig
+@@ -10,3 +10,11 @@ config RESET_STARFIVE_JH7100
+ 	default SOC_STARFIVE
+ 	help
+ 	  This enables the reset controller driver for the StarFive JH7100 SoC.
++
++config RESET_STARFIVE_JH7110
++	bool "StarFive JH7110 Reset Driver"
++	depends on AUXILIARY_BUS && CLK_STARFIVE_JH7110_SYS
++	select RESET_STARFIVE_JH71X0
++	default CLK_STARFIVE_JH7110_SYS
++	help
++	  This enables the reset controller driver for the StarFive JH7110 SoC.
+diff --git a/drivers/reset/starfive/Makefile b/drivers/reset/starfive/Makefile
+index f6aa12466fad..7a44b66fb9d5 100644
+--- a/drivers/reset/starfive/Makefile
++++ b/drivers/reset/starfive/Makefile
+@@ -2,3 +2,4 @@
+ obj-$(CONFIG_RESET_STARFIVE_JH71X0)		+= reset-starfive-jh71x0.o
+ 
+ obj-$(CONFIG_RESET_STARFIVE_JH7100)		+= reset-starfive-jh7100.o
++obj-$(CONFIG_RESET_STARFIVE_JH7110)		+= reset-starfive-jh7110.o
+diff --git a/drivers/reset/starfive/reset-starfive-jh7110.c b/drivers/reset/starfive/reset-starfive-jh7110.c
+new file mode 100644
+index 000000000000..83577d1b7fc6
+--- /dev/null
++++ b/drivers/reset/starfive/reset-starfive-jh7110.c
+@@ -0,0 +1,64 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * Reset driver for the StarFive JH7110 SoC
++ *
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ */
++
++#include <linux/auxiliary_bus.h>
++
++#include "reset-starfive-jh71x0.h"
++
++#include <dt-bindings/reset/starfive,jh7110-crg.h>
++
++static int jh7110_reset_probe(struct auxiliary_device *adev,
++			      const struct auxiliary_device_id *id)
++{
++	struct reset_info *info = (struct reset_info *)(id->driver_data);
++	void __iomem **base = (void __iomem **)dev_get_drvdata(adev->dev.parent);
++
++	if (!info || !base)
++		return -ENODEV;
++
++	return reset_starfive_jh71x0_register(&adev->dev, adev->dev.parent->of_node,
++					      *base + info->assert_offset,
++					      *base + info->status_offset,
++					      NULL,
++					      info->nr_resets,
++					      NULL);
++}
++
++static const struct reset_info jh7110_sys_info = {
++	.nr_resets = JH7110_SYSRST_END,
++	.assert_offset = 0x2F8,
++	.status_offset = 0x308,
++};
++
++static const struct reset_info jh7110_aon_info = {
++	.nr_resets = JH7110_AONRST_END,
++	.assert_offset = 0x38,
++	.status_offset = 0x3C,
++};
++
++static const struct auxiliary_device_id jh7110_reset_ids[] = {
++	{
++		.name = "clk_starfive_jh71x0.reset-sys",
++		.driver_data = (kernel_ulong_t)&jh7110_sys_info,
++	},
++	{
++		.name = "clk_starfive_jh71x0.reset-aon",
++		.driver_data = (kernel_ulong_t)&jh7110_aon_info,
++	},
++	{ /* sentinel */ }
++};
++MODULE_DEVICE_TABLE(auxiliary, jh7110_reset_ids);
++
++static struct auxiliary_driver jh7110_reset_driver = {
++	.probe		= jh7110_reset_probe,
++	.id_table	= jh7110_reset_ids,
++};
++module_auxiliary_driver(jh7110_reset_driver);
++
++MODULE_AUTHOR("Hal Feng <hal.feng@starfivetech.com>");
++MODULE_DESCRIPTION("StarFive JH7110 reset driver");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/reset/starfive/reset-starfive-jh71x0.h b/drivers/reset/starfive/reset-starfive-jh71x0.h
+index db7d39a87f87..e485472e1adc 100644
+--- a/drivers/reset/starfive/reset-starfive-jh71x0.h
++++ b/drivers/reset/starfive/reset-starfive-jh71x0.h
+@@ -6,6 +6,12 @@
+ #ifndef __RESET_STARFIVE_JH71X0_H
+ #define __RESET_STARFIVE_JH71X0_H
+ 
++struct reset_info {
++	unsigned int nr_resets;
++	unsigned int assert_offset;
++	unsigned int status_offset;
++};
++
+ int reset_starfive_jh71x0_register(struct device *dev, struct device_node *of_node,
+ 				   void __iomem *assert, void __iomem *status,
+ 				   const u32 *asserted, unsigned int nr_resets,
+-- 
+2.39.1
+

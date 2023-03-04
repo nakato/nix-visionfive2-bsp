@@ -1,0 +1,37 @@
+From 2bdb482474ecf639f06f68bd86b5b74f48edf7ef Mon Sep 17 00:00:00 2001
+From: Samin Guo <samin.guo@starfivetech.com>
+Date: Fri, 3 Mar 2023 16:59:25 +0800
+Subject: [PATCH 30/33] riscv: dts: starfive: jh7110: Add syscon to support phy
+ interface settings
+
+The phy interface needs to be set in syscon, the format is as follows:
+starfive,syscon: <&syscon, offset, mask>
+
+Signed-off-by: Samin Guo <samin.guo@starfivetech.com>
+---
+ arch/riscv/boot/dts/starfive/jh7110.dtsi | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/arch/riscv/boot/dts/starfive/jh7110.dtsi b/arch/riscv/boot/dts/starfive/jh7110.dtsi
+index aa0547509d1b..803a51f80e8b 100644
+--- a/arch/riscv/boot/dts/starfive/jh7110.dtsi
++++ b/arch/riscv/boot/dts/starfive/jh7110.dtsi
+@@ -586,6 +586,7 @@ gmac0: ethernet@16030000 {
+ 			snps,en-tx-lpi-clockgating;
+ 			snps,txpbl = <16>;
+ 			snps,rxpbl = <16>;
++			starfive,syscon = <&aon_syscon 0xc 0x1c0000>;
+ 			status = "disabled";
+ 			phy-handle = <&phy0>;
+ 
+@@ -628,6 +629,7 @@ gmac1: ethernet@16040000 {
+ 			snps,en-tx-lpi-clockgating;
+ 			snps,txpbl = <16>;
+ 			snps,rxpbl = <16>;
++			starfive,syscon = <&sys_syscon 0x90 0x1c>;
+ 			status = "disabled";
+ 			phy-handle = <&phy1>;
+ 
+-- 
+2.39.1
+
