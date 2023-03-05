@@ -25,6 +25,8 @@
 
         opensbiVisionFive2 = pkgs.callPackage ./opensbi.nix { uboot = self.packages.riscv64-linux.ubootVisionFive2; };
 
+	spl_tool = pkgs.callPackage ./spl_tool.nix { };
+
         ubootVisionFive2 = pkgs.callPackage ./uboot.nix { };
       };
     };
