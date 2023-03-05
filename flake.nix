@@ -18,6 +18,7 @@
       let
         # TODO: Make minimal config less minimal outside of the drivers sphere.
         VF2LinuxHeadMimimalStatic = pkgs.callPackage ./vf2_linux_mainline_head.nix { };
+        uboot = pkgs.callPackage ./uboot.nix { };
       in
       {
         VF2KernelPackages = VF2LinuxHeadMimimalStatic;
@@ -27,7 +28,8 @@
 
 	spl_tool = pkgs.callPackage ./spl_tool.nix { };
 
-        ubootVisionFive2 = pkgs.callPackage ./uboot.nix { };
+        ubootVisionFive2 = uboot.visionFive2;
+        ubootTools = uboot.ubootTools;
       };
     };
 }
