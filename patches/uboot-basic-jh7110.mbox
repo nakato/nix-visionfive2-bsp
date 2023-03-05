@@ -1,0 +1,7839 @@
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -24,6 +24,9 @@
+ 	bool "Support SiFive Unmatched Board"
+ 	select SYS_CACHE_SHIFT_6
+ 
++config TARGET_STARFIVE_VISIONFIVE2
++	bool "Support StarFive VisionFive2 Board"
++
+ config TARGET_SIPEED_MAIX
+ 	bool "Support Sipeed Maix Board"
+ 	select SYS_CACHE_SHIFT_6
+@@ -65,12 +68,14 @@
+ source "board/sifive/unmatched/Kconfig"
+ source "board/openpiton/riscv64/Kconfig"
+ source "board/sipeed/maix/Kconfig"
++source "board/starfive/visionfive2/Kconfig"
+ 
+ # platform-specific options below
+ source "arch/riscv/cpu/andesv5/Kconfig"
+ source "arch/riscv/cpu/fu540/Kconfig"
+ source "arch/riscv/cpu/fu740/Kconfig"
+ source "arch/riscv/cpu/generic/Kconfig"
++source "arch/riscv/cpu/jh7110/Kconfig"
+ 
+ # architecture-specific options below
+ 
+--- a/arch/riscv/dts/Makefile
++++ b/arch/riscv/dts/Makefile
+@@ -7,7 +7,7 @@
+ dtb-$(CONFIG_TARGET_SIFIVE_UNLEASHED) += hifive-unleashed-a00.dtb
+ dtb-$(CONFIG_TARGET_SIFIVE_UNMATCHED) += hifive-unmatched-a00.dtb
+ dtb-$(CONFIG_TARGET_SIPEED_MAIX) += k210-maix-bit.dtb
+-
++dtb-$(CONFIG_TARGET_STARFIVE_VISIONFIVE2) += starfive_visionfive2.dtb
+ include $(srctree)/scripts/Makefile.dts
+ 
+ targets += $(dtb-y)
+--- a/drivers/cache/cache-sifive-ccache.c
++++ b/drivers/cache/cache-sifive-ccache.c
+@@ -62,6 +62,7 @@
+ static const struct udevice_id sifive_ccache_ids[] = {
+ 	{ .compatible = "sifive,fu540-c000-ccache" },
+ 	{ .compatible = "sifive,fu740-c000-ccache" },
++	{ .compatible = "starfive,jh7110-ccache" },
+ 	{}
+ };
+ 
+--- a/drivers/clk/Kconfig
++++ b/drivers/clk/Kconfig
+@@ -235,6 +235,7 @@
+ source "drivers/clk/renesas/Kconfig"
+ source "drivers/clk/sunxi/Kconfig"
+ source "drivers/clk/sifive/Kconfig"
++source "drivers/clk/starfive/Kconfig"
+ source "drivers/clk/stm32/Kconfig"
+ source "drivers/clk/tegra/Kconfig"
+ source "drivers/clk/ti/Kconfig"
+--- a/drivers/clk/Makefile
++++ b/drivers/clk/Makefile
+@@ -13,6 +13,7 @@
+ 
+ obj-y += analogbits/
+ obj-y += imx/
++obj-$(CONFIG_CLK_JH7110) += starfive/
+ obj-y += tegra/
+ obj-y += ti/
+ obj-$(CONFIG_$(SPL_TPL_)CLK_INTEL) += intel/
+--- a/drivers/pinctrl/Kconfig
++++ b/drivers/pinctrl/Kconfig
+@@ -359,5 +359,6 @@
+ source "drivers/pinctrl/rockchip/Kconfig"
+ source "drivers/pinctrl/sunxi/Kconfig"
+ source "drivers/pinctrl/uniphier/Kconfig"
++source "drivers/pinctrl/starfive/Kconfig"
+ 
+ endmenu
+--- a/drivers/pinctrl/Makefile
++++ b/drivers/pinctrl/Makefile
+@@ -32,3 +32,4 @@
+ obj-$(CONFIG_$(SPL_)PINCTRL_STMFX)	+= pinctrl-stmfx.o
+ obj-y				+= broadcom/
+ obj-$(CONFIG_PINCTRL_ZYNQMP)	+= pinctrl-zynqmp.o
++obj-$(CONFIG_PINCTRL_STARFIVE)	+= starfive/
+--- a/drivers/ram/Kconfig
++++ b/drivers/ram/Kconfig
+@@ -112,3 +112,4 @@
+ source "drivers/ram/sifive/Kconfig"
+ source "drivers/ram/stm32mp1/Kconfig"
+ source "drivers/ram/octeon/Kconfig"
++source "drivers/ram/starfive/Kconfig"
+--- a/drivers/ram/Makefile
++++ b/drivers/ram/Makefile
+@@ -20,5 +20,7 @@
+ obj-$(CONFIG_IMXRT_SDRAM) += imxrt_sdram.o
+ 
+ obj-$(CONFIG_RAM_SIFIVE) += sifive/
+-
++ifdef CONFIG_SPL_BUILD
++obj-$(CONFIG_SPL_STARFIVE_DDR) += starfive/
++endif
+ obj-$(CONFIG_ARCH_OCTEON) += octeon/
+--- a/drivers/reset/Kconfig
++++ b/drivers/reset/Kconfig
+@@ -172,6 +172,22 @@
+ 	  different hw blocks like DDR, gemgxl. With this driver we leverage
+ 	  U-Boot's reset framework to reset these hardware blocks.
+ 
++config RESET_JH7110
++	bool "Reset driver for StarFive JH7110 SoC"
++	depends on DM_RESET && STARFIVE_JH7110
++	default y
++	help
++	  Support for reset controller on StarFive
++	  JH7110 SoCs.
++
++config SPL_RESET_JH7110
++	bool "SPL Reset driver for StarFive JH7110 SoC"
++	depends on SPL && STARFIVE_JH7110
++	default y
++	help
++	  Support for reset controller on StarFive
++	  JH7110 SoCs in SPL.
++
+ config RESET_SYSCON
+ 	bool "Enable generic syscon reset driver support"
+ 	depends on DM_RESET
+--- a/drivers/reset/Makefile
++++ b/drivers/reset/Makefile
+@@ -32,3 +32,4 @@
+ obj-$(CONFIG_RESET_ZYNQMP) += reset-zynqmp.o
+ obj-$(CONFIG_RESET_DRA7) += reset-dra7.o
+ obj-$(CONFIG_RESET_AT91) += reset-at91.o
++obj-$(CONFIG_$(SPL_TPL_)RESET_JH7110) += reset-jh7110.o
+--- /dev/null
++++ b/arch/riscv/cpu/jh7110/Kconfig
+@@ -0,0 +1,28 @@
++# SPDX-License-Identifier: GPL-2.0+
++#
++# Copyright (C) 2022 StarFive Technology Co., Ltd.
++
++config STARFIVE_JH7110
++	bool
++	select ARCH_EARLY_INIT_R
++	select CLK_JH7110
++	select CPU
++	select CPU_RISCV
++	select RAM
++	select RESET_JH7110
++	select SUPPORT_SPL
++	select SPL_RAM if SPL
++	select SPL_STARFIVE_DDR
++	select PINCTRL_STARFIVE_JH7110
++	imply MMC
++	imply MMC_BROKEN_CD
++	imply MMC_SPI
++	imply RISCV_TIMER if (RISCV_SMODE || SPL_RISCV_SMODE)
++	imply SIFIVE_CACHE
++	imply SIFIVE_CCACHE
++	imply SMP
++	imply SPI
++	imply SPL_CPU
++	imply SPL_LOAD_FIT
++	imply SPL_OPENSBI
++	imply SPL_SIFIVE_CLINT
+--- /dev/null
++++ b/arch/riscv/cpu/jh7110/Makefile
+@@ -0,0 +1,10 @@
++# SPDX-License-Identifier: GPL-2.0+
++#
++# Copyright (C) 2022 StarFive Technology Co., Ltd.
++
++ifeq ($(CONFIG_SPL_BUILD),y)
++obj-y += spl.o
++else
++obj-y += cpu.o
++obj-y += dram.o
++endif
+--- /dev/null
++++ b/arch/riscv/cpu/jh7110/cpu.c
+@@ -0,0 +1,23 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ * Author: Yanhong Wang <yanhong.wang@starfivetech.com>
++ */
++
++#include <asm/cache.h>
++#include <irq_func.h>
++
++/*
++ * cleanup_before_linux() is called just before we call linux
++ * it prepares the processor for linux
++ *
++ * we disable interrupt and caches.
++ */
++int cleanup_before_linux(void)
++{
++	disable_interrupts();
++
++	cache_flush();
++
++	return 0;
++}
+--- /dev/null
++++ b/arch/riscv/cpu/jh7110/dram.c
+@@ -0,0 +1,38 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ * Author: Yanhong Wang <yanhong.wang@starfivetech.com>
++ */
++
++#include <common.h>
++#include <fdtdec.h>
++#include <init.h>
++#include <linux/sizes.h>
++
++DECLARE_GLOBAL_DATA_PTR;
++
++int dram_init(void)
++{
++	return fdtdec_setup_mem_size_base();
++}
++
++int dram_init_banksize(void)
++{
++	return fdtdec_setup_memory_banksize();
++}
++
++phys_size_t board_get_usable_ram_top(phys_size_t total_size)
++{
++	/*
++	 * Ensure that we run from first 4GB so that all
++	 * addresses used by U-Boot are 32bit addresses.
++	 *
++	 * This in-turn ensures that 32bit DMA capable
++	 * devices work fine because DMA mapping APIs will
++	 * provide 32bit DMA addresses only.
++	 */
++	if (IS_ENABLED(CONFIG_64BIT) && gd->ram_top > SZ_4G)
++		return SZ_4G;
++
++	return gd->ram_top;
++}
+--- /dev/null
++++ b/arch/riscv/cpu/jh7110/spl.c
+@@ -0,0 +1,64 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ * Author: Yanhong Wang<yanhong.wang@starfivetech.com>
++ */
++
++#include <asm/csr.h>
++#include <asm/sections.h>
++#include <dm.h>
++#include <log.h>
++
++#define CSR_U74_FEATURE_DISABLE	0x7c1
++#define L2_LIM_MEM_END	0x81FFFFFUL
++
++int spl_soc_init(void)
++{
++	int ret;
++	struct udevice *dev;
++
++	/* DDR init */
++	ret = uclass_get_device(UCLASS_RAM, 0, &dev);
++	if (ret) {
++		debug("DRAM init failed: %d\n", ret);
++		return ret;
++	}
++
++	return 0;
++}
++
++void harts_early_init(void)
++{
++	ulong *ptr;
++	u8 *tmp;
++	ulong len, remain;
++	/*
++	 * Feature Disable CSR
++	 *
++	 * Clear feature disable CSR to '0' to turn on all features for
++	 * each core. This operation must be in M-mode.
++	 */
++	if (CONFIG_IS_ENABLED(RISCV_MMODE))
++		csr_write(CSR_U74_FEATURE_DISABLE, 0);
++
++	/* clear L2 LIM  memory
++	 * set __bss_end to 0x81FFFFF region to zero
++	 * The L2 Cache Controller supports ECC. ECC is applied to SRAM.
++	 * If it is not cleared, the ECC part is invalid, and an ECC error
++	 * will be reported when reading data.
++	 */
++	ptr = (ulong *)&__bss_end;
++	len = L2_LIM_MEM_END - (ulong)&__bss_end;
++	remain = len % sizeof(ulong);
++	len /= sizeof(ulong);
++
++	while (len--)
++		*ptr++ = 0;
++
++	/* clear the remain bytes */
++	if (remain) {
++		tmp = (u8 *)ptr;
++		while (remain--)
++			*tmp++ = 0;
++	}
++}
+--- /dev/null
++++ b/arch/riscv/dts/jh7110-u-boot.dtsi
+@@ -0,0 +1,72 @@
++// SPDX-License-Identifier: GPL-2.0 OR MIT
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ */
++
++#include <dt-bindings/reset/starfive-jh7110.h>
++
++/ {
++	cpus: cpus {
++		u-boot,dm-spl;
++
++		S76_0: cpu@0 {
++			u-boot,dm-spl;
++			status = "okay";
++			cpu0_intc: interrupt-controller {
++				u-boot,dm-spl;
++			};
++		};
++
++		U74_1: cpu@1 {
++			u-boot,dm-spl;
++			cpu1_intc: interrupt-controller {
++				u-boot,dm-spl;
++			};
++		};
++
++		U74_2: cpu@2 {
++			u-boot,dm-spl;
++			cpu2_intc: interrupt-controller {
++				u-boot,dm-spl;
++			};
++		};
++
++		U74_3: cpu@3 {
++			u-boot,dm-spl;
++			cpu3_intc: interrupt-controller {
++				u-boot,dm-spl;
++			};
++		};
++
++		U74_4: cpu@4 {
++			u-boot,dm-spl;
++			cpu4_intc: interrupt-controller {
++				u-boot,dm-spl;
++			};
++		};
++	};
++
++	soc {
++		u-boot,dm-spl;
++
++		clint: clint@2000000 {
++			u-boot,dm-spl;
++		};
++	};
++};
++
++&gmac0_rmii_refin {
++	u-boot,dm-spl;
++};
++
++&aoncrg {
++	u-boot,dm-spl;
++};
++
++&syscrg {
++	u-boot,dm-spl;
++};
++
++&stgcrg {
++	u-boot,dm-spl;
++};
+--- /dev/null
++++ b/arch/riscv/dts/jh7110.dtsi
+@@ -0,0 +1,497 @@
++// SPDX-License-Identifier: GPL-2.0 OR MIT
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ * Copyright (C) 2022 Emil Renner Berthing <kernel@esmil.dk>
++ */
++
++/dts-v1/;
++
++#include <dt-bindings/clock/starfive-jh7110.h>
++#include <dt-bindings/reset/starfive-jh7110.h>
++
++/ {
++	compatible = "starfive,jh7110";
++	#address-cells = <2>;
++	#size-cells = <2>;
++
++	cpus {
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		S76_0: cpu@0 {
++			compatible = "sifive,u74-mc", "riscv";
++			reg = <0>;
++			d-cache-block-size = <64>;
++			d-cache-sets = <64>;
++			d-cache-size = <8192>;
++			d-tlb-sets = <1>;
++			d-tlb-size = <40>;
++			device_type = "cpu";
++			i-cache-block-size = <64>;
++			i-cache-sets = <64>;
++			i-cache-size = <16384>;
++			i-tlb-sets = <1>;
++			i-tlb-size = <40>;
++			mmu-type = "riscv,sv39";
++			next-level-cache = <&ccache>;
++			riscv,isa = "rv64imacu";
++			tlb-split;
++			status = "disabled";
++
++			cpu0_intc: interrupt-controller {
++				compatible = "riscv,cpu-intc";
++				interrupt-controller;
++				#interrupt-cells = <1>;
++			};
++		};
++
++		U74_1: cpu@1 {
++			compatible = "sifive,u74-mc", "riscv";
++			reg = <1>;
++			d-cache-block-size = <64>;
++			d-cache-sets = <64>;
++			d-cache-size = <32768>;
++			d-tlb-sets = <1>;
++			d-tlb-size = <40>;
++			device_type = "cpu";
++			i-cache-block-size = <64>;
++			i-cache-sets = <64>;
++			i-cache-size = <32768>;
++			i-tlb-sets = <1>;
++			i-tlb-size = <40>;
++			mmu-type = "riscv,sv39";
++			next-level-cache = <&ccache>;
++			riscv,isa = "rv64imafdcbsu";
++			tlb-split;
++
++			cpu1_intc: interrupt-controller {
++				compatible = "riscv,cpu-intc";
++				interrupt-controller;
++				#interrupt-cells = <1>;
++			};
++		};
++
++		U74_2: cpu@2 {
++			compatible = "sifive,u74-mc", "riscv";
++			reg = <2>;
++			d-cache-block-size = <64>;
++			d-cache-sets = <64>;
++			d-cache-size = <32768>;
++			d-tlb-sets = <1>;
++			d-tlb-size = <40>;
++			device_type = "cpu";
++			i-cache-block-size = <64>;
++			i-cache-sets = <64>;
++			i-cache-size = <32768>;
++			i-tlb-sets = <1>;
++			i-tlb-size = <40>;
++			mmu-type = "riscv,sv39";
++			next-level-cache = <&ccache>;
++			riscv,isa = "rv64imafdcbsu";
++			tlb-split;
++
++			cpu2_intc: interrupt-controller {
++				compatible = "riscv,cpu-intc";
++				interrupt-controller;
++				#interrupt-cells = <1>;
++			};
++		};
++
++		U74_3: cpu@3 {
++			compatible = "sifive,u74-mc", "riscv";
++			reg = <3>;
++			d-cache-block-size = <64>;
++			d-cache-sets = <64>;
++			d-cache-size = <32768>;
++			d-tlb-sets = <1>;
++			d-tlb-size = <40>;
++			device_type = "cpu";
++			i-cache-block-size = <64>;
++			i-cache-sets = <64>;
++			i-cache-size = <32768>;
++			i-tlb-sets = <1>;
++			i-tlb-size = <40>;
++			mmu-type = "riscv,sv39";
++			next-level-cache = <&ccache>;
++			riscv,isa = "rv64imafdcbsu";
++			tlb-split;
++
++			cpu3_intc: interrupt-controller {
++				compatible = "riscv,cpu-intc";
++				interrupt-controller;
++				#interrupt-cells = <1>;
++			};
++		};
++
++		U74_4: cpu@4 {
++			compatible = "sifive,u74-mc", "riscv";
++			reg = <4>;
++			d-cache-block-size = <64>;
++			d-cache-sets = <64>;
++			d-cache-size = <32768>;
++			d-tlb-sets = <1>;
++			d-tlb-size = <40>;
++			device_type = "cpu";
++			i-cache-block-size = <64>;
++			i-cache-sets = <64>;
++			i-cache-size = <32768>;
++			i-tlb-sets = <1>;
++			i-tlb-size = <40>;
++			mmu-type = "riscv,sv39";
++			next-level-cache = <&ccache>;
++			riscv,isa = "rv64imafdcbsu";
++			tlb-split;
++
++			cpu4_intc: interrupt-controller {
++				compatible = "riscv,cpu-intc";
++				interrupt-controller;
++				#interrupt-cells = <1>;
++			};
++		};
++
++		cpu-map {
++			cluster0 {
++				core0 {
++					cpu = <&S76_0>;
++				};
++
++				core1 {
++					cpu = <&U74_1>;
++				};
++
++				core2 {
++					cpu = <&U74_2>;
++				};
++
++				core3 {
++					cpu = <&U74_3>;
++				};
++
++				core4 {
++					cpu = <&U74_4>;
++				};
++			};
++		};
++	};
++
++	osc: osc {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		/* This value must be overridden by the board */
++		clock-frequency = <0>;
++	};
++
++	clk_rtc: clk_rtc {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		/* This value must be overridden by the board */
++		clock-frequency = <0>;
++	};
++
++	gmac0_rmii_refin: gmac0_rmii_refin {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		/* This value must be overridden by the board */
++		clock-frequency = <0>;
++	};
++
++	gmac0_rgmii_rxin: gmac0_rgmii_rxin {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		/* This value must be overridden by the board */
++		clock-frequency = <0>;
++	};
++
++	gmac1_rmii_refin: gmac1_rmii_refin {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		/* This value must be overridden by the board */
++		clock-frequency = <0>;
++	};
++
++	gmac1_rgmii_rxin: gmac1_rgmii_rxin {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		/* This value must be overridden by the board */
++		clock-frequency = <0>;
++	};
++
++	i2stx_bclk_ext: i2stx_bclk_ext {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		/* This value must be overridden by the board */
++		clock-frequency = <0>;
++	};
++
++	i2stx_lrck_ext: i2stx_lrck_ext {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		/* This value must be overridden by the board */
++		clock-frequency = <0>;
++	};
++
++	i2srx_bclk_ext: i2srx_bclk_ext {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		/* This value must be overridden by the board */
++		clock-frequency = <0>;
++	};
++
++	i2srx_lrck_ext: i2srx_lrck_ext {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		/* This value must be overridden by the board */
++		clock-frequency = <0>;
++	};
++
++	tdm_ext: tdm_ext {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		/* This value must be overridden by the board */
++		clock-frequency = <0>;
++	};
++
++	mclk_ext: mclk_ext {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		/* This value must be overridden by the board */
++		clock-frequency = <0>;
++	};
++
++	soc {
++		compatible = "simple-bus";
++		interrupt-parent = <&plic>;
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		clint: clint@2000000 {
++			compatible = "starfive,jh7110-clint", "sifive,clint0";
++			reg = <0x0 0x2000000 0x0 0x10000>;
++			interrupts-extended = <&cpu0_intc 3>, <&cpu0_intc 7>,
++					      <&cpu1_intc 3>, <&cpu1_intc 7>,
++					      <&cpu2_intc 3>, <&cpu2_intc 7>,
++					      <&cpu3_intc 3>, <&cpu3_intc 7>,
++					      <&cpu4_intc 3>, <&cpu4_intc 7>;
++		};
++
++		plic: plic@c000000 {
++			compatible = "starfive,jh7110-plic", "sifive,plic-1.0.0";
++			reg = <0x0 0xc000000 0x0 0x4000000>;
++			interrupts-extended = <&cpu0_intc 11>,
++					      <&cpu1_intc 11>, <&cpu1_intc 9>,
++					      <&cpu2_intc 11>, <&cpu2_intc 9>,
++					      <&cpu3_intc 11>, <&cpu3_intc 9>,
++					      <&cpu4_intc 11>, <&cpu4_intc 9>;
++			interrupt-controller;
++			#interrupt-cells = <1>;
++			#address-cells = <0>;
++			riscv,ndev = <136>;
++		};
++
++		ccache: cache-controller@2010000 {
++			compatible = "starfive,jh7110-ccache", "cache";
++			reg = <0x0 0x2010000 0x0 0x4000>;
++			interrupts = <1>, <3>, <4>, <2>;
++			cache-block-size = <64>;
++			cache-level = <2>;
++			cache-sets = <2048>;
++			cache-size = <2097152>;
++			cache-unified;
++		};
++
++		syscrg: clock-controller@13020000 {
++			compatible = "starfive,jh7110-syscrg";
++			reg = <0x0 0x13020000 0x0 0x10000>;
++			clocks = <&osc>, <&gmac1_rmii_refin>,
++				 <&gmac1_rgmii_rxin>,
++				 <&i2stx_bclk_ext>, <&i2stx_lrck_ext>,
++				 <&i2srx_bclk_ext>, <&i2srx_lrck_ext>,
++				 <&tdm_ext>, <&mclk_ext>;
++			clock-names = "osc", "gmac1_rmii_refin",
++				      "gmac1_rgmii_rxin",
++				      "i2stx_bclk_ext", "i2stx_lrck_ext",
++				      "i2srx_bclk_ext", "i2srx_lrck_ext",
++				      "tdm_ext", "mclk_ext";
++			#clock-cells = <1>;
++			#reset-cells = <1>;
++		};
++
++		aoncrg: clock-controller@17000000 {
++			compatible = "starfive,jh7110-aoncrg";
++			reg = <0x0 0x17000000 0x0 0x10000>;
++			clocks = <&osc>, <&clk_rtc>,
++				 <&gmac0_rmii_refin>, <&gmac0_rgmii_rxin>,
++				 <&syscrg JH7110_SYSCLK_STG_AXIAHB>,
++				 <&syscrg JH7110_SYSCLK_APB_BUS_FUNC>,
++				 <&syscrg JH7110_SYSCLK_GMAC0_GTXCLK>;
++			clock-names = "osc", "clk_rtc", "gmac0_rmii_refin",
++				      "gmac0_rgmii_rxin", "stg_axiahb",
++				      "apb_bus_func", "gmac0_gtxclk";
++			#clock-cells = <1>;
++			#reset-cells = <1>;
++		};
++
++		stgcrg: clock-controller@10230000 {
++			compatible = "starfive,jh7110-stgcrg";
++			reg = <0x0 0x10230000 0x0 0x10000>;
++			#clock-cells = <1>;
++			#reset-cells = <1>;
++		};
++
++		gpio: gpio@13040000 {
++			compatible = "starfive,jh7110-sys-pinctrl";
++			reg = <0x0 0x13040000 0x0 0x10000>;
++			reg-names = "control";
++			clocks = <&syscrg JH7110_SYSCLK_IOMUX>;
++			resets = <&syscrg JH7110_SYSRST_IOMUX>;
++			interrupts = <86>;
++			interrupt-controller;
++			#interrupt-cells = <2>;
++			gpio-controller;
++			#gpio-cells = <2>;
++		};
++
++		gpioa: gpio@17020000 {
++			compatible = "starfive,jh7110-aon-pinctrl";
++			reg = <0x0 0x17020000 0x0 0x10000>;
++			reg-names = "control";
++			resets = <&aoncrg JH7110_AONRST_AON_IOMUX>;
++			interrupts = <85>;
++			interrupt-controller;
++			#interrupt-cells = <2>;
++			gpio-controller;
++			#gpio-cells = <2>;
++		};
++
++		uart0: serial@10000000 {
++			compatible = "snps,dw-apb-uart";
++			reg = <0x0 0x10000000 0x0 0x10000>;
++			clocks = <&syscrg JH7110_SYSCLK_UART0_CORE>,
++				 <&syscrg JH7110_SYSCLK_UART0_APB>;
++			clock-names = "baudclk", "apb_pclk";
++			resets = <&syscrg JH7110_SYSRST_UART0_APB>,
++				 <&syscrg JH7110_SYSRST_UART0_CORE>;
++			interrupts = <32>;
++			reg-io-width = <4>;
++			reg-shift = <2>;
++			status = "disabled";
++		};
++
++		uart1: serial@10010000 {
++			compatible = "snps,dw-apb-uart";
++			reg = <0x0 0x10010000 0x0 0x10000>;
++			clocks = <&syscrg JH7110_SYSCLK_UART1_CORE>,
++				 <&syscrg JH7110_SYSCLK_UART1_APB>;
++			clock-names = "baudclk", "apb_pclk";
++			resets = <&syscrg JH7110_SYSRST_UART1_APB>,
++				 <&syscrg JH7110_SYSRST_UART1_CORE>;
++			interrupts = <33>;
++			reg-io-width = <4>;
++			reg-shift = <2>;
++			status = "disabled";
++		};
++
++		uart2: serial@10020000 {
++			compatible = "snps,dw-apb-uart";
++			reg = <0x0 0x10020000 0x0 0x10000>;
++			clocks = <&syscrg JH7110_SYSCLK_UART2_CORE>,
++				 <&syscrg JH7110_SYSCLK_UART2_APB>;
++			clock-names = "baudclk", "apb_pclk";
++			resets = <&syscrg JH7110_SYSRST_UART2_APB>,
++				 <&syscrg JH7110_SYSRST_UART2_CORE>;
++			interrupts = <34>;
++			reg-io-width = <4>;
++			reg-shift = <2>;
++			status = "disabled";
++		};
++
++		uart3: serial@12000000 {
++			compatible = "snps,dw-apb-uart";
++			reg = <0x0 0x12000000 0x0 0x10000>;
++			clocks = <&syscrg JH7110_SYSCLK_UART3_CORE>,
++				 <&syscrg JH7110_SYSCLK_UART3_APB>;
++			clock-names = "baudclk", "apb_pclk";
++			resets = <&syscrg JH7110_SYSRST_UART3_APB>,
++				 <&syscrg JH7110_SYSRST_UART3_CORE>;
++			interrupts = <45>;
++			reg-io-width = <4>;
++			reg-shift = <2>;
++			status = "disabled";
++		};
++
++		uart4: serial@12010000 {
++			compatible = "snps,dw-apb-uart";
++			reg = <0x0 0x12010000 0x0 0x10000>;
++			clocks = <&syscrg JH7110_SYSCLK_UART4_CORE>,
++				 <&syscrg JH7110_SYSCLK_UART4_APB>;
++			clock-names = "baudclk", "apb_pclk";
++			resets = <&syscrg JH7110_SYSRST_UART4_APB>,
++				 <&syscrg JH7110_SYSRST_UART4_CORE>;
++			interrupts = <46>;
++			reg-io-width = <4>;
++			reg-shift = <2>;
++			status = "disabled";
++		};
++
++		uart5: serial@12020000 {
++			compatible = "snps,dw-apb-uart";
++			reg = <0x0 0x12020000 0x0 0x10000>;
++			clocks = <&syscrg JH7110_SYSCLK_UART5_CORE>,
++				 <&syscrg JH7110_SYSCLK_UART5_APB>;
++			clock-names = "baudclk", "apb_pclk";
++			resets = <&syscrg JH7110_SYSRST_UART5_APB>,
++				 <&syscrg JH7110_SYSRST_UART5_CORE>;
++			interrupts = <47>;
++			reg-io-width = <4>;
++			reg-shift = <2>;
++			status = "disabled";
++		};
++
++		sdio0: mmc@16010000 {
++			compatible = "snps,dw-mshc";
++			reg = <0x0 0x16010000 0x0 0x10000>;
++			clocks = <&syscrg JH7110_SYSCLK_SDIO0_AHB>,
++				 <&syscrg JH7110_SYSCLK_SDIO0_SDCARD>;
++			clock-names = "biu", "ciu";
++			resets = <&syscrg JH7110_SYSRST_SDIO0_AHB>;
++			reset-names = "reset";
++			interrupts = <74>;
++			data-addr = <0>;
++			fifo-depth = <32>;
++			fifo-watermark-aligned;
++			status = "disabled";
++		};
++
++		sdio1: mmc@16020000 {
++			compatible = "snps,dw-mshc";
++			reg = <0x0 0x16020000 0x0 0x10000>;
++			clocks = <&syscrg JH7110_SYSCLK_SDIO1_AHB>,
++				 <&syscrg JH7110_SYSCLK_SDIO1_SDCARD>;
++			clock-names = "biu", "ciu";
++			resets = <&syscrg JH7110_SYSRST_SDIO1_AHB>;
++			reset-names = "reset";
++			interrupts = <75>;
++			data-addr = <0>;
++			fifo-depth = <32>;
++			fifo-watermark-aligned;
++			status = "disabled";
++		};
++
++		qspi: spi@13010000 {
++			compatible = "cdns,qspi-nor";
++			reg = <0x0 0x13010000 0x0 0x10000
++				0x0 0x21000000 0x0 0x400000>;
++			clocks = <&syscrg JH7110_SYSCLK_QSPI_REF>;
++			clock-names = "clk_ref";
++			resets = <&syscrg JH7110_SYSRST_QSPI_APB>,
++				 <&syscrg JH7110_SYSRST_QSPI_AHB>,
++				 <&syscrg JH7110_SYSRST_QSPI_REF>;
++			resets-names = "rst_apb", "rst_ahb", "rst_ref";
++			cdns,fifo-depth = <256>;
++			cdns,fifo-width = <4>;
++			#address-cells = <1>;
++			#size-cells = <0>;
++		};
++	};
++};
+--- /dev/null
++++ b/arch/riscv/dts/starfive_visionfive2-u-boot.dtsi
+@@ -0,0 +1,84 @@
++// SPDX-License-Identifier: GPL-2.0 OR MIT
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ */
++
++#include "binman.dtsi"
++#include "jh7110-u-boot.dtsi"
++/ {
++	chosen {
++		u-boot,dm-spl;
++	};
++
++	firmware {
++		spi0 = &qspi;
++		u-boot,dm-spl;
++	};
++
++	config {
++		u-boot,dm-spl;
++		u-boot,spl-payload-offset = <0x100000>;
++	};
++
++	memory@40000000 {
++		u-boot,dm-spl;
++	};
++
++	soc {
++		u-boot,dm-spl;
++
++		dmc: dmc@15700000 {
++			u-boot,dm-spl;
++			compatible = "starfive,jh7110-dmc";
++			reg = <0x0 0x15700000 0x0 0x10000>,
++				<0x0 0x13000000 0x0 0x10000>;
++			resets = <&syscrg JH7110_SYSRST_DDR_AXI>,
++				<&syscrg JH7110_SYSRST_DDR_OSC>,
++				<&syscrg JH7110_SYSRST_DDR_APB>;
++			reset-names = "axi", "osc", "apb";
++			clocks = <&syscrg JH7110_SYSCLK_PLL1_OUT>;
++			clock-names = "pll1";
++			clock-frequency = <2133>;
++		};
++	};
++};
++
++&sys_syscon {
++	u-boot,dm-spl;
++};
++
++&uart0 {
++	u-boot,dm-spl;
++};
++
++&sdio0 {
++	u-boot,dm-spl;
++};
++
++&sdio1 {
++	u-boot,dm-spl;
++};
++
++&qspi {
++	u-boot,dm-spl;
++
++	nor-flash@0 {
++		u-boot,dm-spl;
++	};
++};
++
++&osc {
++	u-boot,dm-spl;
++};
++
++&aoncrg {
++	u-boot,dm-spl;
++};
++
++&syscrg {
++	u-boot,dm-spl;
++};
++
++&stgcrg {
++	u-boot,dm-spl;
++};
+--- /dev/null
++++ b/arch/riscv/dts/starfive_visionfive2.dts
+@@ -0,0 +1,234 @@
++// SPDX-License-Identifier: GPL-2.0 OR MIT
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ */
++
++/dts-v1/;
++
++#include "jh7110.dtsi"
++#include <dt-bindings/pinctrl/pinctrl-starfive-jh7110.h>
++/ {
++	#address-cells = <2>;
++	#size-cells = <2>;
++	model = "StarFive VisionFive V2";
++	compatible = "starfive,jh7110";
++
++	aliases {
++		spi0 = &qspi;
++		mmc0 = &sdio0;
++		mmc1 = &sdio1;
++	};
++
++	chosen {
++		stdout-path = "/soc/serial@10000000:115200";
++	};
++
++	cpus {
++		timebase-frequency = <4000000>;
++	};
++
++	memory@40000000 {
++		device_type = "memory";
++		reg = <0x0 0x40000000 0x1 0x0>;
++	};
++
++	soc {
++		sys_syscon: sys_syscon@13030000 {
++			compatible = "syscon";
++			reg = <0x0 0x13030000 0x0 0x1000>;
++		};
++	};
++};
++
++&S76_0 {
++	status = "okay";
++};
++
++&osc {
++	clock-frequency = <24000000>;
++};
++
++&clk_rtc {
++	clock-frequency = <32768>;
++};
++
++&gmac0_rmii_refin {
++	clock-frequency = <50000000>;
++};
++
++&gmac0_rgmii_rxin {
++	clock-frequency = <125000000>;
++};
++
++&gmac1_rmii_refin {
++	clock-frequency = <50000000>;
++};
++
++&gmac1_rgmii_rxin {
++	clock-frequency = <125000000>;
++};
++
++&i2stx_bclk_ext {
++	clock-frequency = <12288000>;
++};
++
++&i2stx_lrck_ext {
++	clock-frequency = <192000>;
++};
++
++&i2srx_bclk_ext {
++	clock-frequency = <12288000>;
++};
++
++&i2srx_lrck_ext {
++	clock-frequency = <192000>;
++};
++
++&tdm_ext {
++	clock-frequency = <49152000>;
++};
++
++&mclk_ext {
++	clock-frequency = <12288000>;
++};
++
++&gpio {
++	status = "okay";
++	uart0_pins: uart0-0 {
++		tx-pins {
++			pinmux = <GPIOMUX(5, GPOUT_SYS_UART0_TX,
++						GPOEN_ENABLE, GPI_NONE)>;
++			bias-disable;
++			drive-strength = <12>;
++			input-disable;
++			input-schmitt-disable;
++			slew-rate = <0>;
++		};
++
++		rx-pins {
++			pinmux = <GPIOMUX(6, GPOUT_LOW,
++						GPOEN_DISABLE, GPI_SYS_UART0_RX)>;
++			bias-pull-up;
++			drive-strength = <2>;
++			input-enable;
++			input-schmitt-enable;
++			slew-rate = <0>;
++		};
++	};
++
++	mmc0_pins: mmc0-pins {
++		 mmc0-pins-rest {
++			pinmux = <GPIOMUX(62, GPOUT_SYS_SDIO0_RST,
++						GPOEN_ENABLE, GPI_NONE)>;
++			bias-pull-up;
++			drive-strength = <12>;
++			input-disable;
++			input-schmitt-disable;
++			slew-rate = <0>;
++		};
++	};
++
++	sdcard1_pins: sdcard1-pins {
++		sdcard1-pins0 {
++			pinmux = <GPIOMUX(10, GPOUT_SYS_SDIO1_CLK,
++						GPOEN_ENABLE, GPI_NONE)>;
++			bias-pull-up;
++			drive-strength = <12>;
++			input-disable;
++			input-schmitt-disable;
++			slew-rate = <0>;
++		};
++
++		sdcard1-pins1 {
++			pinmux = <GPIOMUX(9, GPOUT_SYS_SDIO1_CMD,
++						GPOEN_SYS_SDIO1_CMD, GPI_SYS_SDIO1_CMD)>;
++			bias-pull-up;
++			drive-strength = <12>;
++			input-enable;
++			input-schmitt-enable;
++			slew-rate = <0>;
++		};
++
++		sdcard1-pins2 {
++			pinmux = <GPIOMUX(11, GPOUT_SYS_SDIO1_DATA0,
++						GPOEN_SYS_SDIO1_DATA0, GPI_SYS_SDIO1_DATA0)>;
++			bias-pull-up;
++			drive-strength = <12>;
++			input-enable;
++			input-schmitt-enable;
++			slew-rate = <0>;
++		};
++
++		sdcard1-pins3 {
++			pinmux = <GPIOMUX(12, GPOUT_SYS_SDIO1_DATA1,
++						GPOEN_SYS_SDIO1_DATA1, GPI_SYS_SDIO1_DATA1)>;
++			bias-pull-up;
++			drive-strength = <12>;
++			input-enable;
++			input-schmitt-enable;
++			slew-rate = <0>;
++		};
++
++		sdcard1-pins4 {
++			pinmux = <GPIOMUX(7, GPOUT_SYS_SDIO1_DATA2,
++						GPOEN_SYS_SDIO1_DATA2, GPI_SYS_SDIO1_DATA2)>;
++			bias-pull-up;
++			drive-strength = <12>;
++			input-enable;
++			input-schmitt-enable;
++			slew-rate = <0>;
++		};
++
++		sdcard1-pins5 {
++			pinmux = <GPIOMUX(8, GPOUT_SYS_SDIO1_DATA3,
++						GPOEN_SYS_SDIO1_DATA3, GPI_SYS_SDIO1_DATA3)>;
++			bias-pull-up;
++			drive-strength = <12>;
++			input-enable;
++			input-schmitt-enable;
++			slew-rate = <0>;
++		};
++	};
++};
++
++&sdio0 {
++	bus-width = <8>;
++	pinctrl-names = "default";
++	pinctrl-0 = <&mmc0_pins>;
++	status = "okay";
++};
++
++&sdio1 {
++	bus-width = <4>;
++	pinctrl-names = "default";
++	pinctrl-0 = <&sdcard1_pins>;
++	status = "okay";
++};
++
++&uart0 {
++	reg-offset = <0>;
++	current-speed = <115200>;
++	clock-frequency = <24000000>;
++	pinctrl-names = "default";
++	pinctrl-0 = <&uart0_pins>;
++	status = "okay";
++};
++
++&qspi {
++	spi-max-frequency = <250000000>;
++	status = "okay";
++
++	nor-flash@0 {
++		compatible = "jedec,spi-nor";
++		reg=<0>;
++		spi-max-frequency = <100000000>;
++		cdns,tshsl-ns = <1>;
++		cdns,tsd2d-ns = <1>;
++		cdns,tchsh-ns = <1>;
++		cdns,tslch-ns = <1>;
++	};
++};
++
++&syscrg {
++	starfive,sys-syscon = <&sys_syscon>;
++};
+--- /dev/null
++++ b/arch/riscv/include/asm/arch-jh7110/regs.h
+@@ -0,0 +1,19 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ * Author: Yanhong Wang <yanhong.wang@starfivetech.com>
++ */
++
++#ifndef __STARFIVE_JH7110_REGS_H
++#define __STARFIVE_JH7110_REGS_H
++
++#define JH7110_SYS_CRG			0x13020000
++#define JH7110_SYS_SYSCON		0x13030000
++#define JH7110_SYS_IOMUX		0x13040000
++#define JH7110_AON_CRG			0x17000000
++#define JH7110_AON_SYSCON		0x17010000
++
++#define JH7110_BOOT_MODE_SELECT_REG	0x1702002c
++#define JH7110_BOOT_MODE_SELECT_MASK	GENMASK(1, 0)
++
++#endif /* __STARFIVE_JH7110_REGS_H */
+--- /dev/null
++++ b/arch/riscv/include/asm/arch-jh7110/spl.h
+@@ -0,0 +1,12 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ * Author: Yanhong Wang <yanhong.wang@starfivetech.com>
++ */
++
++#ifndef _SPL_STARFIVE_H
++#define _SPL_STARFIVE_H
++
++int spl_soc_init(void);
++
++#endif /* _SPL_STARFIVE_H */
+--- /dev/null
++++ b/board/starfive/visionfive2/Kconfig
+@@ -0,0 +1,53 @@
++if TARGET_STARFIVE_VISIONFIVE2
++
++config SYS_CPU
++	default "jh7110"
++
++config SYS_BOARD
++	default "visionfive2"
++
++config SYS_VENDOR
++	default "starfive"
++
++config SYS_CONFIG_NAME
++	default "starfive-visionfive2"
++
++config TEXT_BASE
++	default 0x40200000 if SPL
++	default 0x40000000 if !RISCV_SMODE
++	default 0x40200000 if RISCV_SMODE
++
++config SPL_TEXT_BASE
++	default 0x08000000
++
++config SPL_OPENSBI_LOAD_ADDR
++	default 0x80000000
++
++config BOARD_SPECIFIC_OPTIONS # dummy
++	def_bool y
++	select STARFIVE_JH7110
++	select SUPPORT_SPL
++	select BINMAN
++	imply CMD_CPU
++	imply CMD_DHCP
++	imply CMD_EXT2
++	imply CMD_EXT4
++	imply CMD_FAT
++	imply CMD_FS_GENERIC
++	imply CMD_GPIO
++	imply CMD_GPT
++	imply CMD_MMC
++	imply CMD_NET
++	imply CMD_PING
++	imply CMD_SF
++	imply DM_GPIO
++	imply DOS_PARTITION
++	imply EFI_PARTITION
++	imply MII
++	imply IP_DYN
++	imply ISO_PARTITION
++	imply PARTITION_TYPE_GUID
++	imply PHY_LIB
++	imply PHY_MSCC
++
++endif
+--- /dev/null
++++ b/board/starfive/visionfive2/MAINTAINERS
+@@ -0,0 +1,7 @@
++STARFIVE JH7110 VISIONFIVE2 BOARD
++M: startfive
++S:	Maintained
++F:	arch/riscv/include/asm/arch-jh7110/
++F:	board/starfive/visionfive2/
++F:	include/configs/starfive-visionfive2.h
++F:	configs/starfive_visionfive2_defconfig
+--- /dev/null
++++ b/board/starfive/visionfive2/Makefile
+@@ -0,0 +1,7 @@
++# SPDX-License-Identifier: GPL-2.0+
++#
++# Copyright (C) 2022 StarFive Technology Co., Ltd.
++#
++
++obj-y	:= starfive_visionfive2.o
++obj-$(CONFIG_SPL_BUILD) += spl.o
+--- /dev/null
++++ b/board/starfive/visionfive2/spl.c
+@@ -0,0 +1,118 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ * Author: Yanhong Wang<yanhong.wang@starfivetech.com>
++ */
++
++#include <common.h>
++#include <asm/arch/regs.h>
++#include <asm/arch/spl.h>
++#include <asm/io.h>
++#include <log.h>
++#include <spl.h>
++
++#define JH7110_CLK_CPU_ROOT_OFFSET		0x0U
++#define JH7110_CLK_CPU_ROOT_SHIFT		24
++#define JH7110_CLK_CPU_ROOT_MASK		GENMASK(29, 24)
++#define JH7110_CLK_BUS_ROOT_OFFSET		0x14U
++#define JH7110_CLK_BUS_ROOT_SHIFT		24
++#define JH7110_CLK_BUS_ROOT_MASK		GENMASK(29, 24)
++#define JH7110_CLK_PERH_ROOT_OFFSET		0x10U
++#define JH7110_CLK_PERH_ROOT_SHIFT		24
++#define JH7110_CLK_PERH_ROOT_MASK		GENMASK(29, 24)
++#define JH7110_CLK_NOC_BUS_STG_AXI_OFFSET	0x180U
++#define JH7110_CLK_NOC_BUS_STG_AXI_SHIFT	31
++#define JH7110_CLK_NOC_BUS_STG_AXI_MASK	BIT(31)
++#define JH7110_CLK_AON_APB_FUNC_OFFSET		0x4U
++#define JH7110_CLK_AON_APB_FUNC_SHIFT		24
++#define JH7110_CLK_AON_APB_FUNC_MASK		GENMASK(29, 24)
++#define JH7110_CLK_QSPI_REF_OFFSET		0x168U
++#define JH7110_CLK_QSPI_REF_SHIFT		24
++#define JH7110_CLK_QSPI_REF_MASK		GENMASK(29, 24)
++
++#define ASSIGNED_CLOCK_PARENTS(type, val) \
++	clrsetbits_le32(JH7110_SYS_CRG + JH7110_CLK_##type##_OFFSET, \
++		JH7110_CLK_##type##_MASK, \
++		((val) << JH7110_CLK_##type##_SHIFT) & JH7110_CLK_##type##_MASK)
++
++int spl_board_init_f(void)
++{
++	int ret;
++
++	ret = spl_soc_init();
++	if (ret) {
++		debug("JH7110 SPL init failed: %d\n", ret);
++		return ret;
++	}
++
++	return 0;
++}
++
++u32 spl_boot_device(void)
++{
++	u32 mode;
++
++	mode = in_le32(JH7110_BOOT_MODE_SELECT_REG)
++				& JH7110_BOOT_MODE_SELECT_MASK;
++	switch (mode) {
++	case 0:
++		return BOOT_DEVICE_SPI;
++
++	case 1:
++		return BOOT_DEVICE_MMC2;
++
++	case 2:
++		return BOOT_DEVICE_MMC1;
++
++	case 3:
++		return BOOT_DEVICE_UART;
++
++	default:
++		debug("Unsupported boot device 0x%x.\n", mode);
++		return BOOT_DEVICE_NONE;
++	}
++}
++
++void board_init_f(ulong dummy)
++{
++	int ret;
++
++	ret = spl_early_init();
++	if (ret)
++		panic("spl_early_init() failed: %d\n", ret);
++
++	riscv_cpu_setup(NULL, NULL);
++	preloader_console_init();
++
++	/* select clk_pll0 by default */
++	ASSIGNED_CLOCK_PARENTS(CPU_ROOT, 1);
++
++	/* select clk_pll2 by default */
++	ASSIGNED_CLOCK_PARENTS(BUS_ROOT, 1);
++
++	/* select clk_pll2 by default */
++	ASSIGNED_CLOCK_PARENTS(PERH_ROOT, 1);
++
++	ASSIGNED_CLOCK_PARENTS(NOC_BUS_STG_AXI, 1);
++
++	clrsetbits_le32(JH7110_AON_CRG + JH7110_CLK_AON_APB_FUNC_OFFSET,
++			JH7110_CLK_AON_APB_FUNC_MASK,
++			BIT(JH7110_CLK_AON_APB_FUNC_SHIFT));
++
++	/* select clk_pll0 by default */
++	ASSIGNED_CLOCK_PARENTS(QSPI_REF, 1);
++
++	ret = spl_board_init_f();
++	if (ret) {
++		debug("spl_board_init_f init failed: %d\n", ret);
++		return;
++	}
++}
++
++#if CONFIG_IS_ENABLED(SPL_LOAD_FIT)
++int board_fit_config_name_match(const char *name)
++{
++	/* boot using first FIT config */
++	return 0;
++}
++#endif
+--- /dev/null
++++ b/board/starfive/visionfive2/starfive_visionfive2.c
+@@ -0,0 +1,38 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ * Author: Yanhong Wang<yanhong.wang@starfivetech.com>
++ */
++
++#include <common.h>
++#include <asm/io.h>
++#include <linux/bitops.h>
++
++#define JH7110_L2_PREFETCHER_BASE_ADDR		0x2030000
++#define JH7110_L2_PREFETCHER_HART_OFFSET	0x2000
++
++/* enable U74-mc hart1~hart4 prefetcher */
++static void enable_prefetcher(void)
++{
++	u8 hart;
++	u32 *reg;
++
++	/* JH7110 use U74MC CORE IP, it include five cores(one S7 and four U7),
++	 * but only U7 cores support prefetcher configuration
++	 */
++	for (hart = 1; hart < 5; hart++) {
++		reg = (void *)(u64)(JH7110_L2_PREFETCHER_BASE_ADDR
++					+ hart * JH7110_L2_PREFETCHER_HART_OFFSET);
++
++		mb(); /* memory barrier */
++		setbits_le32(reg, 0x1);
++		mb(); /* memory barrier */
++	}
++}
++
++int board_init(void)
++{
++	enable_prefetcher();
++
++	return 0;
++}
+--- /dev/null
++++ b/configs/starfive_visionfive2_defconfig
+@@ -0,0 +1,72 @@
++CONFIG_RISCV=y
++CONFIG_SYS_MALLOC_LEN=0x800000
++CONFIG_SYS_MALLOC_F_LEN=0x8000
++CONFIG_NR_DRAM_BANKS=1
++CONFIG_SPL_DM_SPI=y
++CONFIG_DEFAULT_DEVICE_TREE="starfive_visionfive2"
++CONFIG_SPL_TEXT_BASE=0x8000000
++CONFIG_SYS_PROMPT="StarFive #"
++CONFIG_SPL_MMC=y
++CONFIG_SPL=y
++CONFIG_SPL_SPI_FLASH_SUPPORT=y
++CONFIG_SPL_SPI=y
++CONFIG_SYS_LOAD_ADDR=0x82000000
++CONFIG_TARGET_STARFIVE_VISIONFIVE2=y
++CONFIG_SPL_OPENSBI_LOAD_ADDR=0x40000000
++CONFIG_ARCH_RV64I=y
++CONFIG_CMODEL_MEDANY=y
++CONFIG_RISCV_SMODE=y
++CONFIG_DISTRO_DEFAULTS=y
++CONFIG_HAS_CUSTOM_SYS_INIT_SP_ADDR=y
++CONFIG_CUSTOM_SYS_INIT_SP_ADDR=0x80000000
++CONFIG_FIT=y
++CONFIG_USE_BOOTARGS=y
++CONFIG_BOOTARGS="console=ttyS0,115200 debug rootwait earlycon=sbi"
++CONFIG_USE_PREBOOT=y
++CONFIG_PREBOOT="setenv fdt_addr ${fdtcontroladdr};fdt addr ${fdtcontroladdr};"
++CONFIG_DEFAULT_FDT_FILE="starfive/starfive_visionfive2.dtb"
++CONFIG_DISPLAY_CPUINFO=y
++CONFIG_DISPLAY_BOARDINFO=y
++CONFIG_SPL_MAX_SIZE=0x40000
++CONFIG_SPL_PAD_TO=0x0
++CONFIG_SPL_BSS_START_ADDR=0x8040000
++CONFIG_SPL_BSS_MAX_SIZE=0x10000
++# CONFIG_SPL_SHARES_INIT_SP_ADDR is not set
++CONFIG_SPL_STACK=0x8180000
++CONFIG_SYS_SPL_MALLOC=y
++CONFIG_HAS_CUSTOM_SPL_MALLOC_START=y
++CONFIG_CUSTOM_SYS_SPL_MALLOC_ADDR=0x80000000
++CONFIG_SYS_SPL_MALLOC_SIZE=0x400000
++CONFIG_SYS_MMCSD_RAW_MODE_U_BOOT_USE_PARTITION=y
++CONFIG_SPL_DM_SPI_FLASH=y
++CONFIG_SPL_DM_RESET=y
++CONFIG_SPL_SPI_LOAD=y
++CONFIG_SYS_CBSIZE=256
++CONFIG_SYS_PBSIZE=276
++CONFIG_SYS_BOOTM_LEN=0x4000000
++CONFIG_CMD_MEMINFO=y
++CONFIG_CMD_TFTPPUT=y
++CONFIG_SYS_RELOC_GD_ENV_ADDR=y
++CONFIG_SPL_CLK_COMPOSITE_CCF=y
++CONFIG_CLK_CCF=y
++CONFIG_CLK_COMPOSITE_CCF=y
++CONFIG_SPL_CLK_JH7110=y
++# CONFIG_I2C is not set
++CONFIG_MMC_HS400_SUPPORT=y
++CONFIG_SPL_MMC_HS400_SUPPORT=y
++CONFIG_MMC_DW=y
++CONFIG_MMC_DW_SNPS=y
++CONFIG_SF_DEFAULT_SPEED=100000000
++CONFIG_SPI_FLASH_EON=y
++CONFIG_SPI_FLASH_GIGADEVICE=y
++CONFIG_SPI_FLASH_ISSI=y
++CONFIG_SPI_FLASH_MACRONIX=y
++CONFIG_PINCTRL=y
++CONFIG_PINCONF=y
++CONFIG_PINCTRL_STARFIVE=y
++# CONFIG_RAM_SIFIVE is not set
++CONFIG_DM_RESET=y
++CONFIG_SYS_NS16550=y
++CONFIG_CADENCE_QSPI=y
++CONFIG_TIMER_EARLY=y
++CONFIG_OF_LIBFDT_OVERLAY=y
+--- /dev/null
++++ b/drivers/clk/starfive/Kconfig
+@@ -0,0 +1,17 @@
++# SPDX-License-Identifier: GPL-2.0+
++
++config SPL_CLK_JH7110
++	bool "SPL clock support for JH7110"
++	depends on STARFIVE_JH7110 && SPL
++	select SPL_CLK
++	select SPL_CLK_CCF
++	help
++	  This enables SPL DM support for clock driver in JH7110.
++
++config CLK_JH7110
++	bool "StarFive JH7110 clock support"
++	depends on STARFIVE_JH7110
++	select CLK
++	select CLK_CCF
++	help
++	  This enables support clock driver for StarFive JH7110 SoC platform.
+--- /dev/null
++++ b/drivers/clk/starfive/Makefile
+@@ -0,0 +1,4 @@
++# SPDX-License-Identifier: GPL-2.0+
++
++obj-y += clk-jh7110.o
++obj-y += clk-jh7110-pll.o
+--- /dev/null
++++ b/drivers/clk/starfive/clk-jh7110-pll.c
+@@ -0,0 +1,293 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ *
++ * Author:	Yanhong Wang <yanhong.wang@starfivetech.com>
++ */
++
++#include <common.h>
++#include <asm/io.h>
++#include <malloc.h>
++#include <clk-uclass.h>
++#include <div64.h>
++#include <dm/device.h>
++#include <linux/bitops.h>
++#include <linux/clk-provider.h>
++#include <linux/delay.h>
++#include <linux/err.h>
++
++#include "clk.h"
++
++#define UBOOT_DM_CLK_JH7110_PLLX "jh7110_clk_pllx"
++
++#define PLL_PD_OFF		1
++#define PLL_PD_ON		0
++
++#define CLK_DDR_BUS_MASK	GENMASK(29, 24)
++#define CLK_DDR_BUS_OFFSET	0xAC
++#define CLK_DDR_BUS_OSC_DIV2	0
++#define CLK_DDR_BUS_PLL1_DIV2	1
++#define CLK_DDR_BUS_PLL1_DIV4	2
++#define CLK_DDR_BUS_PLL1_DIV8	3
++
++struct clk_jh7110_pllx {
++	struct clk		clk;
++	void __iomem	*base;
++	void __iomem	*sysreg;
++	enum starfive_pll_type	type;
++	const struct starfive_pllx_offset *offset;
++	const struct starfive_pllx_rate *rate_table;
++	int rate_count;
++};
++
++#define getbits_le32(addr, mask) ((in_le32(addr) & (mask)) >> __ffs((mask)))
++
++#define PLLX_SET(offset, mask, val) do {\
++		reg = readl((ulong *)((ulong)pll->base + (offset))); \
++		reg &= ~(mask); \
++		reg |= (mask) & ((val) << __ffs(mask)); \
++		writel(reg, (ulong *)((ulong)pll->base + (offset))); \
++	} while (0)
++
++#define PLLX_RATE(_rate, _pd, _fd, _pd1, _da, _ds)	\
++	{						\
++		.rate		= (_rate),	\
++		.prediv		= (_pd),	\
++		.fbdiv		= (_fd),	\
++		.postdiv1	= (_pd1),	\
++		.dacpd		= (_da),	\
++		.dsmpd		= (_ds),	\
++	}
++
++#define to_clk_pllx(_clk) container_of(_clk, struct clk_jh7110_pllx, clk)
++
++static const struct starfive_pllx_rate jh7110_pll0_tbl[] = {
++	PLLX_RATE(375000000UL, 8, 125, 1, 1, 1),
++	PLLX_RATE(500000000UL, 6, 125, 1, 1, 1),
++	PLLX_RATE(625000000UL, 24, 625, 1, 1, 1),
++	PLLX_RATE(750000000UL, 4, 125, 1, 1, 1),
++	PLLX_RATE(875000000UL, 24, 875, 1, 1, 1),
++	PLLX_RATE(1000000000UL, 3, 125, 1, 1, 1),
++	PLLX_RATE(1250000000UL, 12, 625, 1, 1, 1),
++	PLLX_RATE(1375000000UL, 24, 1375, 1, 1, 1),
++	PLLX_RATE(1500000000UL, 2, 125, 1, 1, 1),
++	PLLX_RATE(1625000000UL, 24, 1625, 1, 1, 1),
++	PLLX_RATE(1750000000UL, 12, 875, 1, 1, 1),
++	PLLX_RATE(1800000000UL, 3, 225, 1, 1, 1),
++};
++
++static const struct starfive_pllx_rate jh7110_pll1_tbl[] = {
++	PLLX_RATE(1066000000UL, 12, 533, 1, 1, 1),
++	PLLX_RATE(1200000000UL, 1, 50, 1, 1, 1),
++	PLLX_RATE(1400000000UL, 6, 350, 1, 1, 1),
++	PLLX_RATE(1600000000UL, 3, 200, 1, 1, 1),
++};
++
++static const struct starfive_pllx_rate jh7110_pll2_tbl[] = {
++	PLLX_RATE(1228800000UL, 15, 768, 1, 1, 1),
++	PLLX_RATE(1188000000UL, 2, 99, 1, 1, 1),
++};
++
++static const struct starfive_pllx_offset jh7110_pll0_offset = {
++	.prediv = 0x24,
++	.fbdiv = 0x1c,
++	.frac = 0x20,
++	.postdiv1 = 0x20,
++	.dacpd = 0x18,
++	.dsmpd = 0x18,
++	.prediv_mask = GENMASK(5, 0),
++	.fbdiv_mask = GENMASK(11, 0),
++	.frac_mask = GENMASK(23, 0),
++	.postdiv1_mask = GENMASK(29, 28),
++	.dacpd_mask = BIT(24),
++	.dsmpd_mask = BIT(25)
++};
++
++static const struct starfive_pllx_offset jh7110_pll1_offset = {
++	.prediv = 0x2c,
++	.fbdiv = 0x24,
++	.frac = 0x28,
++	.postdiv1 = 0x28,
++	.dacpd = 0x24,
++	.dsmpd = 0x24,
++	.prediv_mask = GENMASK(5, 0),
++	.fbdiv_mask = GENMASK(28, 17),
++	.frac_mask = GENMASK(23, 0),
++	.postdiv1_mask = GENMASK(29, 28),
++	.dacpd_mask = BIT(15),
++	.dsmpd_mask = BIT(16)
++};
++
++static const struct starfive_pllx_offset jh7110_pll2_offset = {
++	.prediv = 0x34,
++	.fbdiv = 0x2c,
++	.frac = 0x30,
++	.postdiv1 = 0x30,
++	.dacpd = 0x2c,
++	.dsmpd = 0x2c,
++	.prediv_mask = GENMASK(5, 0),
++	.fbdiv_mask = GENMASK(28, 17),
++	.frac_mask = GENMASK(23, 0),
++	.postdiv1_mask = GENMASK(29, 28),
++	.dacpd_mask = BIT(15),
++	.dsmpd_mask = BIT(16)
++};
++
++struct starfive_pllx_clk starfive_jh7110_pll0 __initdata = {
++	.type = PLL0,
++	.offset = &jh7110_pll0_offset,
++	.rate_table = jh7110_pll0_tbl,
++	.rate_count = ARRAY_SIZE(jh7110_pll0_tbl),
++};
++
++struct starfive_pllx_clk starfive_jh7110_pll1 __initdata = {
++	.type = PLL1,
++	.offset = &jh7110_pll1_offset,
++	.rate_table = jh7110_pll1_tbl,
++	.rate_count = ARRAY_SIZE(jh7110_pll1_tbl),
++};
++
++struct starfive_pllx_clk starfive_jh7110_pll2 __initdata = {
++	.type = PLL2,
++	.offset = &jh7110_pll2_offset,
++	.rate_table = jh7110_pll2_tbl,
++	.rate_count = ARRAY_SIZE(jh7110_pll2_tbl),
++};
++
++static const struct starfive_pllx_rate *
++	jh7110_get_pll_settings(struct clk_jh7110_pllx *pll, unsigned long rate)
++{
++	for (int i = 0; i < pll->rate_count; i++)
++		if (rate == pll->rate_table[i].rate)
++			return &pll->rate_table[i];
++
++	return NULL;
++}
++
++static void jh7110_pll_set_rate(struct clk_jh7110_pllx *pll,
++				const struct starfive_pllx_rate *rate)
++{
++	u32 reg;
++	bool set = (pll->type == PLL1) ? true : false;
++
++	if (set) {
++		reg = readl((ulong *)((ulong)pll->sysreg + CLK_DDR_BUS_OFFSET));
++		reg &= ~CLK_DDR_BUS_MASK;
++		reg |= CLK_DDR_BUS_OSC_DIV2 << __ffs(CLK_DDR_BUS_MASK);
++		writel(reg, (ulong *)((ulong)pll->sysreg + CLK_DDR_BUS_OFFSET));
++	}
++
++	PLLX_SET(pll->offset->pd, pll->offset->pd_mask, PLL_PD_OFF);
++	PLLX_SET(pll->offset->dacpd, pll->offset->dacpd_mask, rate->dacpd);
++	PLLX_SET(pll->offset->dsmpd, pll->offset->dsmpd_mask, rate->dsmpd);
++	PLLX_SET(pll->offset->prediv, pll->offset->prediv_mask, rate->prediv);
++	PLLX_SET(pll->offset->fbdiv, pll->offset->fbdiv_mask, rate->fbdiv);
++	PLLX_SET(pll->offset->postdiv1, pll->offset->postdiv1, rate->postdiv1 >> 1);
++	PLLX_SET(pll->offset->pd, pll->offset->pd_mask, PLL_PD_ON);
++
++	if (set) {
++		udelay(100);
++		reg = readl((ulong *)((ulong)pll->sysreg + CLK_DDR_BUS_OFFSET));
++		reg &= ~CLK_DDR_BUS_MASK;
++		reg |= CLK_DDR_BUS_PLL1_DIV2 << __ffs(CLK_DDR_BUS_MASK);
++		writel(reg, (ulong *)((ulong)pll->sysreg + CLK_DDR_BUS_OFFSET));
++	}
++}
++
++static ulong jh7110_pllx_recalc_rate(struct clk *clk)
++{
++	struct clk_jh7110_pllx *pll = to_clk_pllx(dev_get_clk_ptr(clk->dev));
++	u64 refclk = clk_get_parent_rate(clk);
++	u32 dacpd, dsmpd;
++	u32 prediv, fbdiv, postdiv1;
++	u64 frac;
++
++	dacpd = getbits_le32((ulong)pll->base + pll->offset->dacpd,
++			     pll->offset->dacpd_mask);
++	dsmpd = getbits_le32((ulong)pll->base + pll->offset->dsmpd,
++			     pll->offset->dsmpd_mask);
++	prediv = getbits_le32((ulong)pll->base + pll->offset->prediv,
++			      pll->offset->prediv_mask);
++	fbdiv = getbits_le32((ulong)pll->base + pll->offset->fbdiv,
++			     pll->offset->fbdiv_mask);
++	postdiv1 = 1 << getbits_le32((ulong)pll->base + pll->offset->postdiv1,
++			pll->offset->postdiv1_mask);
++	frac = (u64)getbits_le32((ulong)pll->base + pll->offset->frac,
++			pll->offset->frac_mask);
++
++	/* Integer Mode or Fraction Mode */
++	if (dacpd == 1 && dsmpd == 1)
++		frac = 0;
++	else if (dacpd == 0 && dsmpd == 0)
++		do_div(frac, 1 << 24);
++	else
++		return -EINVAL;
++
++	refclk *= (fbdiv + frac);
++	do_div(refclk, prediv * postdiv1);
++
++	return refclk;
++}
++
++static ulong jh7110_pllx_set_rate(struct clk *clk, ulong drate)
++{
++	struct clk_jh7110_pllx *pll = to_clk_pllx(dev_get_clk_ptr(clk->dev));
++	const struct starfive_pllx_rate *rate;
++
++	rate = jh7110_get_pll_settings(pll, drate);
++	if (!rate)
++		return -EINVAL;
++
++	jh7110_pll_set_rate(pll, rate);
++
++	return jh7110_pllx_recalc_rate(clk);
++}
++
++static const struct clk_ops clk_jh7110_ops = {
++	.set_rate	= jh7110_pllx_set_rate,
++	.get_rate	= jh7110_pllx_recalc_rate,
++};
++
++struct clk *starfive_jh7110_pll(const char *name, const char *parent_name,
++				void __iomem *base, void __iomem *sysreg,
++				const struct starfive_pllx_clk *pll_clk)
++{
++	struct clk_jh7110_pllx *pll;
++	struct clk *clk;
++	int ret;
++
++	if (!pll_clk || !base || !sysreg)
++		return ERR_PTR(-EINVAL);
++
++	pll = kzalloc(sizeof(*pll), GFP_KERNEL);
++	if (!pll)
++		return ERR_PTR(-ENOMEM);
++
++	pll->base = base;
++	pll->sysreg = sysreg;
++	pll->type = pll_clk->type;
++	pll->offset = pll_clk->offset;
++	pll->rate_table = pll_clk->rate_table;
++	pll->rate_count = pll_clk->rate_count;
++
++	clk = &pll->clk;
++	ret = clk_register(clk, UBOOT_DM_CLK_JH7110_PLLX, name, parent_name);
++	if (ret) {
++		kfree(pll);
++		return ERR_PTR(ret);
++	}
++
++	if (IS_ENABLED(CONFIG_SPL_BUILD) && pll->type == PLL0)
++		jh7110_pllx_set_rate(clk, 1250000000);
++
++	if (IS_ENABLED(CONFIG_SPL_BUILD) && pll->type == PLL2)
++		jh7110_pllx_set_rate(clk, 1188000000);
++
++	return clk;
++}
++
++U_BOOT_DRIVER(jh7110_clk_pllx) = {
++	.name	= UBOOT_DM_CLK_JH7110_PLLX,
++	.id	= UCLASS_CLK,
++	.ops	= &clk_jh7110_ops,
++};
+--- /dev/null
++++ b/drivers/clk/starfive/clk-jh7110.c
+@@ -0,0 +1,559 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ *
++ * Author:	Yanhong Wang <yanhong.wang@starfivetech.com>
++ */
++
++#include <common.h>
++#include <clk.h>
++#include <clk-uclass.h>
++#include <dm.h>
++#include <dm/device.h>
++#include <dm/devres.h>
++#include <dm/lists.h>
++#include <dt-bindings/clock/starfive-jh7110.h>
++#include <log.h>
++#include <linux/clk-provider.h>
++
++#include "clk.h"
++
++#define STARFIVE_CLK_ENABLE_SHIFT	31 /* [31] */
++#define STARFIVE_CLK_INVERT_SHIFT	30 /* [30] */
++#define STARFIVE_CLK_MUX_SHIFT		24 /* [29:24] */
++#define STARFIVE_CLK_DIV_SHIFT		0  /* [23:0] */
++
++#define OFFSET(id) ((id) * 4)
++#define AONOFFSET(id) (((id) - JH7110_SYSCLK_END) * 4)
++#define STGOFFSET(id) (((id) - JH7110_AONCLK_END) * 4)
++
++typedef int (*jh1710_init_fn)(struct udevice *dev);
++
++struct jh7110_clk_priv {
++	void __iomem *reg;
++	jh1710_init_fn init;
++};
++
++static const char *cpu_root_sels[2] = {
++	[0] = "osc",
++	[1] = "pll0_out",
++};
++
++static const char *perh_root_sels[2] = {
++	[0] = "pll0_out",
++	[1] = "pll2_out",
++};
++
++static const char *bus_root_sels[2] = {
++	[0] = "osc",
++	[1] = "pll2_out",
++};
++
++static const char *qspi_ref_sels[2] = {
++	[0] = "osc",
++	[1] = "qspi_ref_src",
++};
++
++static const char *gmac1_tx_sels[2] = {
++	[0] = "gmac1_gtxclk",
++	[1] = "gmac1_rmii_rtx",
++};
++
++static const char *gmac0_tx_sels[2] = {
++	[0] = "gmac0_gtxclk",
++	[1] = "gmac0_rmii_rtx",
++};
++
++static struct clk *starfive_clk_mux(void __iomem *reg,
++				    const char *name,
++				    unsigned int offset,
++				    u8 width,
++				    const char * const *parent_names,
++				    u8 num_parents)
++{
++	return  clk_register_mux(NULL, name, parent_names, num_parents, 0,
++				reg + offset, STARFIVE_CLK_MUX_SHIFT,
++				width, 0);
++}
++
++static struct clk *starfive_clk_gate(void __iomem *reg,
++				     const char *name,
++				     const char *parent_name,
++				     unsigned int offset)
++{
++	return clk_register_gate(NULL, name, parent_name, 0, reg + offset,
++				STARFIVE_CLK_ENABLE_SHIFT, 0, NULL);
++}
++
++static struct clk *starfive_clk_fix_factor(void __iomem *reg,
++					   const char *name,
++					   const char *parent_name,
++					   unsigned int mult,
++					   unsigned int div)
++{
++	return clk_register_fixed_factor(NULL, name, parent_name,
++		0, mult, div);
++}
++
++static struct clk *starfive_clk_divider(void __iomem *reg,
++					const char *name,
++					const char *parent_name,
++					unsigned int offset,
++					u8 width)
++{
++	return clk_register_divider(NULL, name, parent_name, 0, reg + offset,
++				0, width, CLK_DIVIDER_ONE_BASED);
++}
++
++static struct clk *starfive_clk_composite(void __iomem *reg,
++					  const char *name,
++					  const char * const *parent_names,
++					  unsigned int num_parents,
++					  unsigned int offset,
++					  unsigned int mux_width,
++					  unsigned int gate_width,
++					  unsigned int div_width)
++{
++	struct clk *clk = ERR_PTR(-ENOMEM);
++	struct clk_divider *div = NULL;
++	struct clk_gate *gate = NULL;
++	struct clk_mux *mux = NULL;
++	int mask_arry[4] = {0x1, 0x3, 0x7, 0xF};
++	int mask;
++
++	if (mux_width) {
++		if (mux_width > 4)
++			goto fail;
++		else
++			mask = mask_arry[mux_width - 1];
++
++		mux = kzalloc(sizeof(*mux), GFP_KERNEL);
++		if (!mux)
++			goto fail;
++
++		mux->reg = reg + offset;
++		mux->mask = mask;
++		mux->shift = STARFIVE_CLK_MUX_SHIFT;
++		mux->num_parents = num_parents;
++		mux->flags = 0;
++		mux->parent_names = parent_names;
++	}
++
++	if (gate_width) {
++		gate = kzalloc(sizeof(*gate), GFP_KERNEL);
++
++		if (!gate)
++			goto fail;
++
++		gate->reg = reg + offset;
++		gate->bit_idx = STARFIVE_CLK_ENABLE_SHIFT;
++		gate->flags = 0;
++	}
++
++	if (div_width) {
++		div = kzalloc(sizeof(*div), GFP_KERNEL);
++		if (!div)
++			goto fail;
++
++		div->reg = reg + offset;
++
++		if (offset == OFFSET(JH7110_SYSCLK_UART3_CORE) ||
++		    offset == OFFSET(JH7110_SYSCLK_UART4_CORE) ||
++		    offset == OFFSET(JH7110_SYSCLK_UART5_CORE)) {
++			div->shift = 8;
++			div->width = 8;
++		} else {
++			div->shift = STARFIVE_CLK_DIV_SHIFT;
++			div->width = div_width;
++		}
++		div->flags = CLK_DIVIDER_ONE_BASED;
++		div->table = NULL;
++	}
++
++	clk = clk_register_composite(NULL, name,
++				     parent_names, num_parents,
++				     &mux->clk, &clk_mux_ops,
++				     &div->clk, &clk_divider_ops,
++				     &gate->clk, &clk_gate_ops, 0);
++
++	if (IS_ERR(clk))
++		goto fail;
++
++	return clk;
++
++fail:
++	kfree(gate);
++	kfree(div);
++	kfree(mux);
++	return ERR_CAST(clk);
++}
++
++static struct clk *starfive_clk_fix_parent_composite(void __iomem *reg,
++						     const char *name,
++						     const char *parent_names,
++						     unsigned int offset,
++						     unsigned int mux_width,
++						     unsigned int gate_width,
++						     unsigned int div_width)
++{
++	const char * const *parents;
++
++	parents  = &parent_names;
++
++	return starfive_clk_composite(reg, name, parents, 1, offset,
++			mux_width, gate_width, div_width);
++}
++
++static struct clk *starfive_clk_gate_divider(void __iomem *reg,
++					     const char *name,
++					     const char *parent,
++					     unsigned int offset,
++					     unsigned int width)
++{
++	const char * const *parent_names;
++
++	parent_names  = &parent;
++
++	return starfive_clk_composite(reg, name, parent_names, 1,
++				offset, 0, 1, width);
++}
++
++static int jh7110_syscrg_init(struct udevice *dev)
++{
++	struct jh7110_clk_priv *priv = dev_get_priv(dev);
++	struct ofnode_phandle_args args;
++	fdt_addr_t addr;
++	int ret;
++
++	ret = ofnode_parse_phandle_with_args(dev->node_, "starfive,sys-syscon", NULL, 0, 0, &args);
++	if (ret)
++		return ret;
++
++	addr =  ofnode_get_addr(args.node);
++	if (addr == FDT_ADDR_T_NONE)
++		return -EINVAL;
++
++	clk_dm(JH7110_SYSCLK_PLL0_OUT,
++	       starfive_jh7110_pll("pll0_out", "osc", (void __iomem *)addr,
++				   priv->reg, &starfive_jh7110_pll0));
++	clk_dm(JH7110_SYSCLK_PLL1_OUT,
++	       starfive_jh7110_pll("pll1_out", "osc", (void __iomem *)addr,
++				   priv->reg, &starfive_jh7110_pll1));
++	clk_dm(JH7110_SYSCLK_PLL2_OUT,
++	       starfive_jh7110_pll("pll2_out", "osc", (void __iomem *)addr,
++				   priv->reg, &starfive_jh7110_pll2));
++	clk_dm(JH7110_SYSCLK_CPU_ROOT,
++	       starfive_clk_mux(priv->reg, "cpu_root",
++				OFFSET(JH7110_SYSCLK_CPU_ROOT), 1,
++				cpu_root_sels, ARRAY_SIZE(cpu_root_sels)));
++	clk_dm(JH7110_SYSCLK_CPU_CORE,
++	       starfive_clk_divider(priv->reg,
++				    "cpu_core", "cpu_root",
++				    OFFSET(JH7110_SYSCLK_CPU_CORE), 3));
++	clk_dm(JH7110_SYSCLK_CPU_BUS,
++	       starfive_clk_divider(priv->reg,
++				    "cpu_bus", "cpu_core",
++				    OFFSET(JH7110_SYSCLK_CPU_BUS), 2));
++	clk_dm(JH7110_SYSCLK_GMACUSB_ROOT,
++	       starfive_clk_fix_factor(priv->reg,
++				       "gmacusb_root", "pll0_out", 1, 1));
++	clk_dm(JH7110_SYSCLK_PERH_ROOT,
++	       starfive_clk_composite(priv->reg,
++				      "perh_root",
++				      perh_root_sels, ARRAY_SIZE(perh_root_sels),
++				      OFFSET(JH7110_SYSCLK_PERH_ROOT), 1, 0, 2));
++	clk_dm(JH7110_SYSCLK_BUS_ROOT,
++	       starfive_clk_mux(priv->reg, "bus_root",
++				OFFSET(JH7110_SYSCLK_BUS_ROOT), 1,
++				bus_root_sels,	ARRAY_SIZE(bus_root_sels)));
++	clk_dm(JH7110_SYSCLK_AXI_CFG0,
++	       starfive_clk_divider(priv->reg,
++				    "axi_cfg0", "bus_root",
++				    OFFSET(JH7110_SYSCLK_AXI_CFG0), 2));
++	clk_dm(JH7110_SYSCLK_STG_AXIAHB,
++	       starfive_clk_divider(priv->reg,
++				    "stg_axiahb", "axi_cfg0",
++				    OFFSET(JH7110_SYSCLK_STG_AXIAHB), 2));
++	clk_dm(JH7110_SYSCLK_AHB0,
++	       starfive_clk_gate(priv->reg,
++				 "ahb0", "stg_axiahb",
++				 OFFSET(JH7110_SYSCLK_AHB0)));
++	clk_dm(JH7110_SYSCLK_AHB1,
++	       starfive_clk_gate(priv->reg,
++				 "ahb1", "stg_axiahb",
++				 OFFSET(JH7110_SYSCLK_AHB1)));
++	clk_dm(JH7110_SYSCLK_APB_BUS_FUNC,
++	       starfive_clk_divider(priv->reg,
++				    "apb_bus_func", "stg_axiahb",
++				    OFFSET(JH7110_SYSCLK_APB_BUS_FUNC), 4));
++	clk_dm(JH7110_SYSCLK_PCLK2_MUX_FUNC,
++	       starfive_clk_fix_factor(priv->reg,
++				       "pclk2_mux_func", "apb_bus_func", 1, 1));
++	clk_dm(JH7110_SYSCLK_PCLK2_MUX,
++	       starfive_clk_fix_factor(priv->reg,
++				       "pclk2_mux", "pclk2_mux_func", 1, 1));
++	clk_dm(JH7110_SYSCLK_APB_BUS,
++	       starfive_clk_fix_factor(priv->reg,
++				       "apb_bus", "pclk2_mux", 1, 1));
++	clk_dm(JH7110_SYSCLK_APB0,
++	       starfive_clk_gate(priv->reg,
++				 "apb0", "apb_bus",
++				 OFFSET(JH7110_SYSCLK_APB0)));
++	clk_dm(JH7110_SYSCLK_APB12,
++	       starfive_clk_fix_factor(priv->reg,
++				       "apb12", "apb_bus", 1, 1));
++	clk_dm(JH7110_SYSCLK_AON_APB,
++	       starfive_clk_fix_factor(priv->reg,
++				       "aon_apb", "apb_bus_func", 1, 1));
++	clk_dm(JH7110_SYSCLK_QSPI_AHB,
++	       starfive_clk_gate(priv->reg,
++				 "qspi_ahb", "ahb1",
++				 OFFSET(JH7110_SYSCLK_QSPI_AHB)));
++	clk_dm(JH7110_SYSCLK_QSPI_APB,
++	       starfive_clk_gate(priv->reg,
++				 "qspi_apb", "apb12",
++				 OFFSET(JH7110_SYSCLK_QSPI_APB)));
++	clk_dm(JH7110_SYSCLK_QSPI_REF_SRC,
++	       starfive_clk_divider(priv->reg,
++				    "qspi_ref_src", "gmacusb_root",
++				    OFFSET(JH7110_SYSCLK_QSPI_REF_SRC), 5));
++	clk_dm(JH7110_SYSCLK_QSPI_REF,
++	       starfive_clk_composite(priv->reg,
++				      "qspi_ref",
++				      qspi_ref_sels, ARRAY_SIZE(qspi_ref_sels),
++				      OFFSET(JH7110_SYSCLK_QSPI_REF), 1, 1, 0));
++	clk_dm(JH7110_SYSCLK_SDIO0_AHB,
++	       starfive_clk_gate(priv->reg,
++				 "sdio0_ahb", "ahb0",
++				 OFFSET(JH7110_SYSCLK_SDIO0_AHB)));
++	clk_dm(JH7110_SYSCLK_SDIO1_AHB,
++	       starfive_clk_gate(priv->reg,
++				 "sdio1_ahb", "ahb0",
++				 OFFSET(JH7110_SYSCLK_SDIO1_AHB)));
++	clk_dm(JH7110_SYSCLK_SDIO0_SDCARD,
++	       starfive_clk_fix_parent_composite(priv->reg,
++						 "sdio0_sdcard", "axi_cfg0",
++						 OFFSET(JH7110_SYSCLK_SDIO0_SDCARD), 0, 1, 4));
++	clk_dm(JH7110_SYSCLK_SDIO1_SDCARD,
++	       starfive_clk_fix_parent_composite(priv->reg,
++						 "sdio1_sdcard", "axi_cfg0",
++						 OFFSET(JH7110_SYSCLK_SDIO1_SDCARD), 0, 1, 4));
++	clk_dm(JH7110_SYSCLK_USB_125M,
++	       starfive_clk_divider(priv->reg,
++				    "usb_125m", "gmacusb_root",
++				    OFFSET(JH7110_SYSCLK_USB_125M), 4));
++	clk_dm(JH7110_SYSCLK_GMAC1_AHB,
++	       starfive_clk_gate(priv->reg,
++				 "gmac1_ahb", "ahb0",
++				 OFFSET(JH7110_SYSCLK_GMAC1_AHB)));
++	clk_dm(JH7110_SYSCLK_GMAC1_AXI,
++	       starfive_clk_gate(priv->reg,
++				 "gmac1_axi", "stg_axiahb",
++				 OFFSET(JH7110_SYSCLK_GMAC1_AXI)));
++	clk_dm(JH7110_SYSCLK_GMAC_SRC,
++	       starfive_clk_divider(priv->reg,
++				    "gmac_src", "gmacusb_root",
++				    OFFSET(JH7110_SYSCLK_GMAC_SRC), 3));
++	clk_dm(JH7110_SYSCLK_GMAC1_GTXCLK,
++	       starfive_clk_divider(priv->reg,
++				    "gmac1_gtxclk", "gmacusb_root",
++				    OFFSET(JH7110_SYSCLK_GMAC1_GTXCLK), 4));
++	clk_dm(JH7110_SYSCLK_GMAC1_GTXC,
++	       starfive_clk_gate(priv->reg,
++				 "gmac1_gtxc", "gmac1_gtxclk",
++				 OFFSET(JH7110_SYSCLK_GMAC1_GTXC)));
++	clk_dm(JH7110_SYSCLK_GMAC1_RMII_RTX,
++	       starfive_clk_divider(priv->reg,
++				    "gmac1_rmii_rtx", "gmac1_rmii_refin",
++				    OFFSET(JH7110_SYSCLK_GMAC1_RMII_RTX), 5));
++	clk_dm(JH7110_SYSCLK_GMAC1_PTP,
++	       starfive_clk_gate_divider(priv->reg,
++					 "gmac1_ptp", "gmac_src",
++					 OFFSET(JH7110_SYSCLK_GMAC1_PTP), 5));
++	clk_dm(JH7110_SYSCLK_GMAC1_TX,
++	       starfive_clk_composite(priv->reg,
++				      "gmac1_tx",
++				      gmac1_tx_sels, ARRAY_SIZE(gmac1_tx_sels),
++				      OFFSET(JH7110_SYSCLK_GMAC1_TX), 1, 1, 0));
++	clk_dm(JH7110_SYSCLK_AON_AHB,
++	       starfive_clk_fix_factor(priv->reg, "aon_ahb",
++				       "stg_axiahb", 1, 1));
++	clk_dm(JH7110_SYSCLK_GMAC0_GTXCLK,
++	       starfive_clk_gate_divider(priv->reg,
++					 "gmac0_gtxclk", "gmacusb_root",
++					 OFFSET(JH7110_SYSCLK_GMAC0_GTXCLK), 4));
++	clk_dm(JH7110_SYSCLK_GMAC0_PTP,
++	       starfive_clk_gate_divider(priv->reg,
++					 "gmac0_ptp", "gmac_src",
++					 OFFSET(JH7110_SYSCLK_GMAC0_PTP), 5));
++	clk_dm(JH7110_SYSCLK_GMAC0_GTXC,
++	       starfive_clk_gate(priv->reg,
++				 "gmac0_gtxc", "gmac0_gtxclk",
++				 OFFSET(JH7110_SYSCLK_GMAC0_GTXC)));
++	clk_dm(JH7110_SYSCLK_UART0_APB,
++	       starfive_clk_gate(priv->reg,
++				 "uart0_apb", "apb0",
++				 OFFSET(JH7110_SYSCLK_UART0_APB)));
++	clk_dm(JH7110_SYSCLK_UART0_CORE,
++	       starfive_clk_gate(priv->reg,
++				 "uart0_core", "osc",
++				 OFFSET(JH7110_SYSCLK_UART0_CORE)));
++	clk_dm(JH7110_SYSCLK_UART1_APB,
++	       starfive_clk_gate(priv->reg,
++				 "uart1_apb", "apb0",
++				 OFFSET(JH7110_SYSCLK_UART1_APB)));
++	clk_dm(JH7110_SYSCLK_UART1_CORE,
++	       starfive_clk_gate(priv->reg,
++				 "uart1_core", "osc",
++				 OFFSET(JH7110_SYSCLK_UART1_CORE)));
++	clk_dm(JH7110_SYSCLK_UART2_APB,
++	       starfive_clk_gate(priv->reg,
++				 "uart2_apb", "apb0",
++				 OFFSET(JH7110_SYSCLK_UART2_APB)));
++	clk_dm(JH7110_SYSCLK_UART2_CORE,
++	       starfive_clk_gate(priv->reg,
++				 "uart2_core", "osc",
++				 OFFSET(JH7110_SYSCLK_UART2_CORE)));
++	clk_dm(JH7110_SYSCLK_UART3_APB,
++	       starfive_clk_gate(priv->reg,
++				 "uart3_apb", "apb0",
++				 OFFSET(JH7110_SYSCLK_UART3_APB)));
++	clk_dm(JH7110_SYSCLK_UART3_CORE,
++	       starfive_clk_gate_divider(priv->reg,
++					 "uart3_core", "perh_root",
++					 OFFSET(JH7110_SYSCLK_UART3_CORE), 8));
++	clk_dm(JH7110_SYSCLK_UART4_APB,
++	       starfive_clk_gate(priv->reg,
++				 "uart4_apb", "apb0",
++				 OFFSET(JH7110_SYSCLK_UART4_APB)));
++	clk_dm(JH7110_SYSCLK_UART4_CORE,
++	       starfive_clk_gate_divider(priv->reg,
++					 "uart4_core", "perh_root",
++					 OFFSET(JH7110_SYSCLK_UART4_CORE), 8));
++	clk_dm(JH7110_SYSCLK_UART5_APB,
++	       starfive_clk_gate(priv->reg,
++				 "uart5_apb", "apb0",
++				 OFFSET(JH7110_SYSCLK_UART5_APB)));
++	clk_dm(JH7110_SYSCLK_UART5_CORE,
++	       starfive_clk_gate_divider(priv->reg,
++					 "uart5_core", "perh_root",
++					 OFFSET(JH7110_SYSCLK_UART5_CORE), 8));
++	clk_dm(JH7110_SYSCLK_I2C5_APB,
++	       starfive_clk_gate(priv->reg,
++				 "i2c5_apb", "apb12",
++				 OFFSET(JH7110_SYSCLK_I2C5_APB)));
++	clk_dm(JH7110_SYSCLK_I2C5_CORE,
++	       starfive_clk_fix_factor(priv->reg,
++				       "i2c5_core", "i2c5_apb", 1, 1));
++
++	return 0;
++}
++
++static int jh7110_aoncrg_init(struct udevice *dev)
++{
++	struct jh7110_clk_priv *priv = dev_get_priv(dev);
++
++	clk_dm(JH7110_AONCLK_GMAC0_AHB,
++	       starfive_clk_gate(priv->reg,
++				 "gmac0_ahb", "aon_ahb",
++				 AONOFFSET(JH7110_AONCLK_GMAC0_AHB)));
++	clk_dm(JH7110_AONCLK_GMAC0_AXI,
++	       starfive_clk_gate(priv->reg,
++				 "gmac0_axi", "aon_ahb",
++				 AONOFFSET(JH7110_AONCLK_GMAC0_AXI)));
++	clk_dm(JH7110_AONCLK_GMAC0_RMII_RTX,
++	       starfive_clk_divider(priv->reg,
++				    "gmac0_rmii_rtx", "gmac0_rmii_refin",
++				    AONOFFSET(JH7110_AONCLK_GMAC0_RMII_RTX), 5));
++	clk_dm(JH7110_AONCLK_GMAC0_TX,
++	       starfive_clk_composite(priv->reg,
++				      "gmac0_tx", gmac0_tx_sels,
++				      ARRAY_SIZE(gmac0_tx_sels),
++				      AONOFFSET(JH7110_AONCLK_GMAC0_TX), 1, 1, 0));
++	clk_dm(JH7110_AONCLK_OTPC_APB,
++	       starfive_clk_gate(priv->reg,
++				 "otpc_apb", "aon_apb",
++				 AONOFFSET(JH7110_AONCLK_OTPC_APB)));
++
++	return 0;
++}
++
++static int jh7110_stgcrg_init(struct udevice *dev)
++{
++	struct jh7110_clk_priv *priv = dev_get_priv(dev);
++
++	clk_dm(JH7110_STGCLK_STG_APB,
++	       starfive_clk_fix_factor(priv->reg,
++				       "stg_apb", "apb_bus", 1, 1));
++	clk_dm(JH7110_STGCLK_USB_APB,
++	       starfive_clk_gate(priv->reg,
++				 "usb_apb", "stg_apb",
++				 STGOFFSET(JH7110_STGCLK_USB_APB)));
++	clk_dm(JH7110_STGCLK_USB_UTMI_APB,
++	       starfive_clk_gate(priv->reg,
++				 "usb_utmi_apb", "stg_apb",
++				 STGOFFSET(JH7110_STGCLK_USB_UTMI_APB)));
++	clk_dm(JH7110_STGCLK_USB_AXI,
++	       starfive_clk_gate(priv->reg,
++				 "usb_axi", "stg_axiahb",
++				 STGOFFSET(JH7110_STGCLK_USB_AXI)));
++	clk_dm(JH7110_STGCLK_USB_LPM,
++	       starfive_clk_gate_divider(priv->reg,
++					 "usb_lpm", "osc",
++					 STGOFFSET(JH7110_STGCLK_USB_LPM), 2));
++	clk_dm(JH7110_STGCLK_USB_STB,
++	       starfive_clk_gate_divider(priv->reg,
++					 "usb_stb", "osc",
++					 STGOFFSET(JH7110_STGCLK_USB_STB), 3));
++	clk_dm(JH7110_STGCLK_USB_APP_125,
++	       starfive_clk_gate(priv->reg,
++				 "usb_app_125", "usb_125m",
++				 STGOFFSET(JH7110_STGCLK_USB_APP_125)));
++	clk_dm(JH7110_STGCLK_USB_REFCLK,
++	       starfive_clk_divider(priv->reg, "usb_refclk", "osc",
++				    STGOFFSET(JH7110_STGCLK_USB_REFCLK), 2));
++	return 0;
++}
++
++static int jh7110_clk_probe(struct udevice *dev)
++{
++	struct jh7110_clk_priv *priv = dev_get_priv(dev);
++
++	priv->init = (jh1710_init_fn)dev_get_driver_data(dev);
++	priv->reg =  (void __iomem *)dev_read_addr_ptr(dev);
++
++	if (priv->init)
++		return priv->init(dev);
++
++	return 0;
++}
++
++static int jh7110_clk_bind(struct udevice *dev)
++{
++	/* The reset driver does not have a device node, so bind it here */
++	return device_bind_driver_to_node(dev, "jh7110_reset", dev->name,
++							dev_ofnode(dev), NULL);
++}
++
++static const struct udevice_id jh7110_clk_of_match[] = {
++	{ .compatible = "starfive,jh7110-syscrg",
++	  .data = (ulong)&jh7110_syscrg_init
++	},
++	{ .compatible = "starfive,jh7110-stgcrg",
++	  .data = (ulong)&jh7110_stgcrg_init
++	},
++	{ .compatible = "starfive,jh7110-aoncrg",
++	  .data = (ulong)&jh7110_aoncrg_init
++	},
++	{ }
++};
++
++U_BOOT_DRIVER(jh7110_clk) = {
++	.name = "jh7110_clk",
++	.id = UCLASS_CLK,
++	.of_match = jh7110_clk_of_match,
++	.probe = jh7110_clk_probe,
++	.ops = &ccf_clk_ops,
++	.priv_auto = sizeof(struct jh7110_clk_priv),
++	.bind		= jh7110_clk_bind,
++};
+--- /dev/null
++++ b/drivers/clk/starfive/clk.h
+@@ -0,0 +1,60 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * Copyright (C) 2022 Starfive, Inc.
++ * Author:	Yanhong Wang <yanhong.wang@starfivetech.com>
++ *
++ */
++
++#ifndef __CLK_STARFIVE_H
++#define __CLK_STARFIVE_H
++
++enum starfive_pll_type {
++	PLL0 = 0,
++	PLL1,
++	PLL2,
++	PLL_MAX = PLL2
++};
++
++struct starfive_pllx_rate {
++	u64 rate;
++	u32 prediv;
++	u32 fbdiv;
++	u32 frac;
++	u32 postdiv1;
++	u32 dacpd;
++	u32 dsmpd;
++};
++
++struct starfive_pllx_offset {
++	u32 pd;
++	u32 prediv;
++	u32 fbdiv;
++	u32 frac;
++	u32 postdiv1;
++	u32 dacpd;
++	u32 dsmpd;
++	u32 pd_mask;
++	u32 prediv_mask;
++	u32 fbdiv_mask;
++	u32 frac_mask;
++	u32 postdiv1_mask;
++	u32 dacpd_mask;
++	u32 dsmpd_mask;
++};
++
++struct starfive_pllx_clk {
++	enum starfive_pll_type type;
++	const struct starfive_pllx_offset *offset;
++	const struct starfive_pllx_rate *rate_table;
++	int rate_count;
++	int flags;
++};
++
++extern struct starfive_pllx_clk starfive_jh7110_pll0;
++extern struct starfive_pllx_clk starfive_jh7110_pll1;
++extern struct starfive_pllx_clk starfive_jh7110_pll2;
++
++struct clk *starfive_jh7110_pll(const char *name, const char *parent_name,
++				void __iomem *base, void __iomem *sysreg,
++				const struct starfive_pllx_clk *pll_clk);
++#endif
+--- /dev/null
++++ b/drivers/pinctrl/starfive/Kconfig
+@@ -0,0 +1,16 @@
++# SPDX-License-Identifier: GPL-2.0-only
++
++config PINCTRL_STARFIVE
++	bool "Pinctrl driver for StarFive SoC"
++	depends on PINCTRL_FULL
++	help
++	  Say yes here to support pin control on the StarFive RISC-V SoC.
++	  This also provides an interface to the GPIO pins not used by other
++	  peripherals supporting inputs, outputs, configuring pull-up/pull-down
++	  and interrupts on input changes.
++
++config PINCTRL_STARFIVE_JH7110
++	bool "Pinctrl and GPIO driver for StarFive JH7110 SoC"
++	depends on  PINCTRL_STARFIVE
++	help
++	  This selects the pinctrl driver for JH7110 starfive.
+--- /dev/null
++++ b/drivers/pinctrl/starfive/Makefile
+@@ -0,0 +1,6 @@
++
++# SPDX-License-Identifier: GPL-2.0
++# Core
++obj-$(CONFIG_PINCTRL_STARFIVE) += pinctrl-starfive.o
++# SoC Drivers
++obj-$(CONFIG_PINCTRL_STARFIVE_JH7110)	+= pinctrl-jh7110-sys.o pinctrl-jh7110-aon.o
+--- /dev/null
++++ b/drivers/pinctrl/starfive/pinctrl-jh7110-aon.c
+@@ -0,0 +1,113 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Pinctrl / GPIO driver for StarFive JH7110 SoC
++ *
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ *   Author: Lee Kuan Lim <kuanlim.lee@starfivetech.com>
++ *   Author: Jianlong Huang <jianlong.huang@starfivetech.com>
++ */
++
++#include <dm/read.h>
++#include <dm/device_compat.h>
++#include <linux/io.h>
++
++#include <dt-bindings/pinctrl/pinctrl-starfive-jh7110.h>
++#include "pinctrl-starfive.h"
++
++#define JH7110_AON_NGPIO		4
++#define JH7110_AON_GC_BASE		64
++
++/* registers */
++#define JH7110_AON_DOEN		0x0
++#define JH7110_AON_DOUT		0x4
++#define JH7110_AON_GPI			0x8
++#define JH7110_AON_GPIOIN		0x2c
++
++#define JH7110_AON_GPIOEN		0xc
++#define JH7110_AON_GPIOIS		0x10
++#define JH7110_AON_GPIOIC		0x14
++#define JH7110_AON_GPIOIBE		0x18
++#define JH7110_AON_GPIOIEV		0x1c
++#define JH7110_AON_GPIOIE		0x20
++#define JH7110_AON_GPIORIS		0x28
++#define JH7110_AON_GPIOMIS		0x28
++
++#define AON_GPO_PDA_0_5_CFG		0x30
++
++static int jh7110_aon_set_one_pin_mux(struct udevice *dev, unsigned int pin,
++				      unsigned int din, u32 dout,
++				      u32 doen, u32 func)
++{
++	struct starfive_pinctrl_priv *priv = dev_get_priv(dev);
++
++	if (pin < priv->info->ngpios && func == 0)
++		starfive_set_gpiomux(dev, pin, din, dout, doen);
++
++	return 0;
++}
++
++static int jh7110_aon_get_padcfg_base(struct udevice *dev,
++				      unsigned int pin)
++{
++	if (pin < PAD_GMAC0_MDC)
++		return AON_GPO_PDA_0_5_CFG;
++
++	return -1;
++}
++
++static void jh7110_aon_init_hw(struct udevice *dev)
++{
++	struct starfive_pinctrl_priv *priv = dev_get_priv(dev);
++
++	/* mask all GPIO interrupts */
++	writel(0, priv->base + JH7110_AON_GPIOIE);
++	/* clear edge interrupt flags */
++	writel(0, priv->base + JH7110_AON_GPIOIC);
++	writel(0x0f, priv->base + JH7110_AON_GPIOIC);
++	/* enable GPIO interrupts */
++	writel(1, priv->base + JH7110_AON_GPIOEN);
++}
++
++const struct starfive_pinctrl_soc_info jh7110_aon_pinctrl_info = {
++	/* pin conf */
++	.set_one_pinmux = jh7110_aon_set_one_pin_mux,
++	.get_padcfg_base  = jh7110_aon_get_padcfg_base,
++
++	/* gpio dout/doen/din/gpioinput register */
++	.dout_reg_base = JH7110_AON_DOUT,
++	.dout_mask = GENMASK(3, 0),
++	.doen_reg_base = JH7110_AON_DOEN,
++	.doen_mask = GENMASK(2, 0),
++	.gpi_reg_base = JH7110_AON_GPI,
++	.gpi_mask = GENMASK(3, 0),
++	.gpioin_reg_base = JH7110_AON_GPIOIN,
++
++	/* gpio */
++	.gpio_bank_name = "RGPIO",
++	.ngpios = JH7110_AON_NGPIO,
++	.gpio_init_hw = jh7110_aon_init_hw,
++};
++
++static int jh7110_aon_pinctrl_probe(struct udevice *dev)
++{
++	struct starfive_pinctrl_soc_info *info =
++		(struct starfive_pinctrl_soc_info *)dev_get_driver_data(dev);
++
++	return starfive_pinctrl_probe(dev, info);
++}
++
++static const struct udevice_id jh7110_aon_pinctrl_ids[] = {
++	/* JH7110 aon pinctrl */
++	{ .compatible = "starfive,jh7110-aon-pinctrl",
++	  .data = (ulong)&jh7110_aon_pinctrl_info, },
++	{ /* sentinel */ }
++};
++
++U_BOOT_DRIVER(jh7110_aon_pinctrl) = {
++	.name		= "jh7110-aon-pinctrl",
++	.id		= UCLASS_PINCTRL,
++	.of_match	= jh7110_aon_pinctrl_ids,
++	.priv_auto	= sizeof(struct starfive_pinctrl_priv),
++	.ops		= &starfive_pinctrl_ops,
++	.probe		= jh7110_aon_pinctrl_probe,
++};
+--- /dev/null
++++ b/drivers/pinctrl/starfive/pinctrl-jh7110-sys.c
+@@ -0,0 +1,399 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Pinctrl / GPIO driver for StarFive JH7110 SoC
++ *
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ *   Author: Lee Kuan Lim <kuanlim.lee@starfivetech.com>
++ *   Author: Jianlong Huang <jianlong.huang@starfivetech.com>
++ */
++
++#include <dm/read.h>
++#include <dm/device_compat.h>
++#include <linux/io.h>
++
++#include <dt-bindings/pinctrl/pinctrl-starfive-jh7110.h>
++#include "pinctrl-starfive.h"
++
++#define JH7110_SYS_NGPIO		64
++#define JH7110_SYS_GC_BASE		0
++
++/* registers */
++#define JH7110_SYS_DOEN		0x000
++#define JH7110_SYS_DOUT		0x040
++#define JH7110_SYS_GPI			0x080
++#define JH7110_SYS_GPIOIN		0x118
++
++#define JH7110_SYS_GPIOEN		0x0dc
++#define JH7110_SYS_GPIOIS0		0x0e0
++#define JH7110_SYS_GPIOIS1		0x0e4
++#define JH7110_SYS_GPIOIC0		0x0e8
++#define JH7110_SYS_GPIOIC1		0x0ec
++#define JH7110_SYS_GPIOIBE0		0x0f0
++#define JH7110_SYS_GPIOIBE1		0x0f4
++#define JH7110_SYS_GPIOIEV0		0x0f8
++#define JH7110_SYS_GPIOIEV1		0x0fc
++#define JH7110_SYS_GPIOIE0		0x100
++#define JH7110_SYS_GPIOIE1		0x104
++#define JH7110_SYS_GPIORIS0		0x108
++#define JH7110_SYS_GPIORIS1		0x10c
++#define JH7110_SYS_GPIOMIS0		0x110
++#define JH7110_SYS_GPIOMIS1		0x114
++
++#define SYS_GPO_PDA_0_74_CFG		0x120
++#define SYS_GPO_PDA_89_94_CFG		0x284
++
++static const struct starfive_pinctrl_pin jh7110_sys_pins[] = {
++	STARFIVE_PINCTRL(PAD_GPIO0,		"GPIO0"),
++	STARFIVE_PINCTRL(PAD_GPIO1,		"GPIO1"),
++	STARFIVE_PINCTRL(PAD_GPIO2,		"GPIO2"),
++	STARFIVE_PINCTRL(PAD_GPIO3,		"GPIO3"),
++	STARFIVE_PINCTRL(PAD_GPIO4,		"GPIO4"),
++	STARFIVE_PINCTRL(PAD_GPIO5,		"GPIO5"),
++	STARFIVE_PINCTRL(PAD_GPIO6,		"GPIO6"),
++	STARFIVE_PINCTRL(PAD_GPIO7,		"GPIO7"),
++	STARFIVE_PINCTRL(PAD_GPIO8,		"GPIO8"),
++	STARFIVE_PINCTRL(PAD_GPIO9,		"GPIO9"),
++	STARFIVE_PINCTRL(PAD_GPIO10,		"GPIO10"),
++	STARFIVE_PINCTRL(PAD_GPIO11,		"GPIO11"),
++	STARFIVE_PINCTRL(PAD_GPIO12,		"GPIO12"),
++	STARFIVE_PINCTRL(PAD_GPIO13,		"GPIO13"),
++	STARFIVE_PINCTRL(PAD_GPIO14,		"GPIO14"),
++	STARFIVE_PINCTRL(PAD_GPIO15,		"GPIO15"),
++	STARFIVE_PINCTRL(PAD_GPIO16,		"GPIO16"),
++	STARFIVE_PINCTRL(PAD_GPIO17,		"GPIO17"),
++	STARFIVE_PINCTRL(PAD_GPIO18,		"GPIO18"),
++	STARFIVE_PINCTRL(PAD_GPIO19,		"GPIO19"),
++	STARFIVE_PINCTRL(PAD_GPIO20,		"GPIO20"),
++	STARFIVE_PINCTRL(PAD_GPIO21,		"GPIO21"),
++	STARFIVE_PINCTRL(PAD_GPIO22,		"GPIO22"),
++	STARFIVE_PINCTRL(PAD_GPIO23,		"GPIO23"),
++	STARFIVE_PINCTRL(PAD_GPIO24,		"GPIO24"),
++	STARFIVE_PINCTRL(PAD_GPIO25,		"GPIO25"),
++	STARFIVE_PINCTRL(PAD_GPIO26,		"GPIO26"),
++	STARFIVE_PINCTRL(PAD_GPIO27,		"GPIO27"),
++	STARFIVE_PINCTRL(PAD_GPIO28,		"GPIO28"),
++	STARFIVE_PINCTRL(PAD_GPIO29,		"GPIO29"),
++	STARFIVE_PINCTRL(PAD_GPIO30,		"GPIO30"),
++	STARFIVE_PINCTRL(PAD_GPIO31,		"GPIO31"),
++	STARFIVE_PINCTRL(PAD_GPIO32,		"GPIO32"),
++	STARFIVE_PINCTRL(PAD_GPIO33,		"GPIO33"),
++	STARFIVE_PINCTRL(PAD_GPIO34,		"GPIO34"),
++	STARFIVE_PINCTRL(PAD_GPIO35,		"GPIO35"),
++	STARFIVE_PINCTRL(PAD_GPIO36,		"GPIO36"),
++	STARFIVE_PINCTRL(PAD_GPIO37,		"GPIO37"),
++	STARFIVE_PINCTRL(PAD_GPIO38,		"GPIO38"),
++	STARFIVE_PINCTRL(PAD_GPIO39,		"GPIO39"),
++	STARFIVE_PINCTRL(PAD_GPIO40,		"GPIO40"),
++	STARFIVE_PINCTRL(PAD_GPIO41,		"GPIO41"),
++	STARFIVE_PINCTRL(PAD_GPIO42,		"GPIO42"),
++	STARFIVE_PINCTRL(PAD_GPIO43,		"GPIO43"),
++	STARFIVE_PINCTRL(PAD_GPIO44,		"GPIO44"),
++	STARFIVE_PINCTRL(PAD_GPIO45,		"GPIO45"),
++	STARFIVE_PINCTRL(PAD_GPIO46,		"GPIO46"),
++	STARFIVE_PINCTRL(PAD_GPIO47,		"GPIO47"),
++	STARFIVE_PINCTRL(PAD_GPIO48,		"GPIO48"),
++	STARFIVE_PINCTRL(PAD_GPIO49,		"GPIO49"),
++	STARFIVE_PINCTRL(PAD_GPIO50,		"GPIO50"),
++	STARFIVE_PINCTRL(PAD_GPIO51,		"GPIO51"),
++	STARFIVE_PINCTRL(PAD_GPIO52,		"GPIO52"),
++	STARFIVE_PINCTRL(PAD_GPIO53,		"GPIO53"),
++	STARFIVE_PINCTRL(PAD_GPIO54,		"GPIO54"),
++	STARFIVE_PINCTRL(PAD_GPIO55,		"GPIO55"),
++	STARFIVE_PINCTRL(PAD_GPIO56,		"GPIO56"),
++	STARFIVE_PINCTRL(PAD_GPIO57,		"GPIO57"),
++	STARFIVE_PINCTRL(PAD_GPIO58,		"GPIO58"),
++	STARFIVE_PINCTRL(PAD_GPIO59,		"GPIO59"),
++	STARFIVE_PINCTRL(PAD_GPIO60,		"GPIO60"),
++	STARFIVE_PINCTRL(PAD_GPIO61,		"GPIO61"),
++	STARFIVE_PINCTRL(PAD_GPIO62,		"GPIO62"),
++	STARFIVE_PINCTRL(PAD_GPIO63,		"GPIO63"),
++	STARFIVE_PINCTRL(PAD_SD0_CLK,		"SD0_CLK"),
++	STARFIVE_PINCTRL(PAD_SD0_CMD,		"SD0_CMD"),
++	STARFIVE_PINCTRL(PAD_SD0_DATA0,		"SD0_DATA0"),
++	STARFIVE_PINCTRL(PAD_SD0_DATA1,		"SD0_DATA1"),
++	STARFIVE_PINCTRL(PAD_SD0_DATA2,		"SD0_DATA2"),
++	STARFIVE_PINCTRL(PAD_SD0_DATA3,		"SD0_DATA3"),
++	STARFIVE_PINCTRL(PAD_SD0_DATA4,		"SD0_DATA4"),
++	STARFIVE_PINCTRL(PAD_SD0_DATA5,		"SD0_DATA5"),
++	STARFIVE_PINCTRL(PAD_SD0_DATA6,		"SD0_DATA6"),
++	STARFIVE_PINCTRL(PAD_SD0_DATA7,		"SD0_DATA7"),
++	STARFIVE_PINCTRL(PAD_SD0_STRB,		"SD0_STRB"),
++	STARFIVE_PINCTRL(PAD_GMAC1_MDC,		"GMAC1_MDC"),
++	STARFIVE_PINCTRL(PAD_GMAC1_MDIO,	"GMAC1_MDIO"),
++	STARFIVE_PINCTRL(PAD_GMAC1_RXD0,	"GMAC1_RXD0"),
++	STARFIVE_PINCTRL(PAD_GMAC1_RXD1,	"GMAC1_RXD1"),
++	STARFIVE_PINCTRL(PAD_GMAC1_RXD2,	"GMAC1_RXD2"),
++	STARFIVE_PINCTRL(PAD_GMAC1_RXD3,	"GMAC1_RXD3"),
++	STARFIVE_PINCTRL(PAD_GMAC1_RXDV,	"GMAC1_RXDV"),
++	STARFIVE_PINCTRL(PAD_GMAC1_RXC,		"GMAC1_RXC"),
++	STARFIVE_PINCTRL(PAD_GMAC1_TXD0,	"GMAC1_TXD0"),
++	STARFIVE_PINCTRL(PAD_GMAC1_TXD1,	"GMAC1_TXD1"),
++	STARFIVE_PINCTRL(PAD_GMAC1_TXD2,	"GMAC1_TXD2"),
++	STARFIVE_PINCTRL(PAD_GMAC1_TXD3,	"GMAC1_TXD3"),
++	STARFIVE_PINCTRL(PAD_GMAC1_TXEN,	"GMAC1_TXEN"),
++	STARFIVE_PINCTRL(PAD_GMAC1_TXC,		"GMAC1_TXC"),
++	STARFIVE_PINCTRL(PAD_QSPI_SCLK,		"QSPI_SCLK"),
++	STARFIVE_PINCTRL(PAD_QSPI_CS0,		"QSPI_CS0"),
++	STARFIVE_PINCTRL(PAD_QSPI_DATA0,	"QSPI_DATA0"),
++	STARFIVE_PINCTRL(PAD_QSPI_DATA1,	"QSPI_DATA1"),
++	STARFIVE_PINCTRL(PAD_QSPI_DATA2,	"QSPI_DATA2"),
++	STARFIVE_PINCTRL(PAD_QSPI_DATA3,	"QSPI_DATA3"),
++};
++
++struct jh7110_func_sel {
++	u16 offset;
++	u8 shift;
++	u8 max;
++};
++
++static const struct jh7110_func_sel
++	jh7110_sys_func_sel[ARRAY_SIZE(jh7110_sys_pins)] = {
++	[PAD_GMAC1_RXC] = { 0x29c,  0, 1 },
++	[PAD_GPIO10]    = { 0x29c,  2, 3 },
++	[PAD_GPIO11]    = { 0x29c,  5, 3 },
++	[PAD_GPIO12]    = { 0x29c,  8, 3 },
++	[PAD_GPIO13]    = { 0x29c, 11, 3 },
++	[PAD_GPIO14]    = { 0x29c, 14, 3 },
++	[PAD_GPIO15]    = { 0x29c, 17, 3 },
++	[PAD_GPIO16]    = { 0x29c, 20, 3 },
++	[PAD_GPIO17]    = { 0x29c, 23, 3 },
++	[PAD_GPIO18]    = { 0x29c, 26, 3 },
++	[PAD_GPIO19]    = { 0x29c, 29, 3 },
++
++	[PAD_GPIO20]    = { 0x2a0,  0, 3 },
++	[PAD_GPIO21]    = { 0x2a0,  3, 3 },
++	[PAD_GPIO22]    = { 0x2a0,  6, 3 },
++	[PAD_GPIO23]    = { 0x2a0,  9, 3 },
++	[PAD_GPIO24]    = { 0x2a0, 12, 3 },
++	[PAD_GPIO25]    = { 0x2a0, 15, 3 },
++	[PAD_GPIO26]    = { 0x2a0, 18, 3 },
++	[PAD_GPIO27]    = { 0x2a0, 21, 3 },
++	[PAD_GPIO28]    = { 0x2a0, 24, 3 },
++	[PAD_GPIO29]    = { 0x2a0, 27, 3 },
++
++	[PAD_GPIO30]    = { 0x2a4,  0, 3 },
++	[PAD_GPIO31]    = { 0x2a4,  3, 3 },
++	[PAD_GPIO32]    = { 0x2a4,  6, 3 },
++	[PAD_GPIO33]    = { 0x2a4,  9, 3 },
++	[PAD_GPIO34]    = { 0x2a4, 12, 3 },
++	[PAD_GPIO35]    = { 0x2a4, 15, 3 },
++	[PAD_GPIO36]    = { 0x2a4, 17, 3 },
++	[PAD_GPIO37]    = { 0x2a4, 20, 3 },
++	[PAD_GPIO38]    = { 0x2a4, 23, 3 },
++	[PAD_GPIO39]    = { 0x2a4, 26, 3 },
++	[PAD_GPIO40]    = { 0x2a4, 29, 3 },
++
++	[PAD_GPIO41]    = { 0x2a8,  0, 3 },
++	[PAD_GPIO42]    = { 0x2a8,  3, 3 },
++	[PAD_GPIO43]    = { 0x2a8,  6, 3 },
++	[PAD_GPIO44]    = { 0x2a8,  9, 3 },
++	[PAD_GPIO45]    = { 0x2a8, 12, 3 },
++	[PAD_GPIO46]    = { 0x2a8, 15, 3 },
++	[PAD_GPIO47]    = { 0x2a8, 18, 3 },
++	[PAD_GPIO48]    = { 0x2a8, 21, 3 },
++	[PAD_GPIO49]    = { 0x2a8, 24, 3 },
++	[PAD_GPIO50]    = { 0x2a8, 27, 3 },
++	[PAD_GPIO51]    = { 0x2a8, 30, 3 },
++
++	[PAD_GPIO52]    = { 0x2ac,  0, 3 },
++	[PAD_GPIO53]    = { 0x2ac,  2, 3 },
++	[PAD_GPIO54]    = { 0x2ac,  4, 3 },
++	[PAD_GPIO55]    = { 0x2ac,  6, 3 },
++	[PAD_GPIO56]    = { 0x2ac,  9, 3 },
++	[PAD_GPIO57]    = { 0x2ac, 12, 3 },
++	[PAD_GPIO58]    = { 0x2ac, 15, 3 },
++	[PAD_GPIO59]    = { 0x2ac, 18, 3 },
++	[PAD_GPIO60]    = { 0x2ac, 21, 3 },
++	[PAD_GPIO61]    = { 0x2ac, 24, 3 },
++	[PAD_GPIO62]    = { 0x2ac, 27, 3 },
++	[PAD_GPIO63]    = { 0x2ac, 30, 3 },
++
++	[PAD_GPIO6]     = { 0x2b0,  0, 3 },
++	[PAD_GPIO7]     = { 0x2b0,  2, 3 },
++	[PAD_GPIO8]     = { 0x2b0,  5, 3 },
++	[PAD_GPIO9]     = { 0x2b0,  8, 3 },
++};
++
++struct jh7110_vin_group_sel {
++	u16 offset;
++	u8 shift;
++	u8 group;
++};
++
++static const struct jh7110_vin_group_sel
++	jh7110_sys_vin_group_sel[ARRAY_SIZE(jh7110_sys_pins)] = {
++	[PAD_GPIO6]     = { 0x2b4, 21, 0 },
++	[PAD_GPIO7]     = { 0x2b4, 18, 0 },
++	[PAD_GPIO8]     = { 0x2b4, 15, 0 },
++	[PAD_GPIO9]     = { 0x2b0, 11, 0 },
++	[PAD_GPIO10]    = { 0x2b0, 20, 0 },
++	[PAD_GPIO11]    = { 0x2b0, 23, 0 },
++	[PAD_GPIO12]    = { 0x2b0, 26, 0 },
++	[PAD_GPIO13]    = { 0x2b0, 29, 0 },
++	[PAD_GPIO14]    = { 0x2b4,  0, 0 },
++	[PAD_GPIO15]    = { 0x2b4,  3, 0 },
++	[PAD_GPIO16]    = { 0x2b4,  6, 0 },
++	[PAD_GPIO17]    = { 0x2b4,  9, 0 },
++	[PAD_GPIO18]    = { 0x2b4, 12, 0 },
++	[PAD_GPIO19]    = { 0x2b0, 14, 0 },
++	[PAD_GPIO20]    = { 0x2b0, 17, 0 },
++
++	[PAD_GPIO21]    = { 0x2b4, 21, 1 },
++	[PAD_GPIO22]    = { 0x2b4, 18, 1 },
++	[PAD_GPIO23]    = { 0x2b4, 15, 1 },
++	[PAD_GPIO24]    = { 0x2b0, 11, 1 },
++	[PAD_GPIO25]    = { 0x2b0, 20, 1 },
++	[PAD_GPIO26]    = { 0x2b0, 23, 1 },
++	[PAD_GPIO27]    = { 0x2b0, 26, 1 },
++	[PAD_GPIO28]    = { 0x2b0, 29, 1 },
++	[PAD_GPIO29]    = { 0x2b4,  0, 1 },
++	[PAD_GPIO30]    = { 0x2b4,  3, 1 },
++	[PAD_GPIO31]    = { 0x2b4,  6, 1 },
++	[PAD_GPIO32]    = { 0x2b4,  9, 1 },
++	[PAD_GPIO33]    = { 0x2b4, 12, 1 },
++	[PAD_GPIO34]    = { 0x2b0, 14, 1 },
++	[PAD_GPIO35]    = { 0x2b0, 17, 1 },
++
++	[PAD_GPIO36]    = { 0x2b4, 21, 2 },
++	[PAD_GPIO37]    = { 0x2b4, 18, 2 },
++	[PAD_GPIO38]    = { 0x2b4, 15, 2 },
++	[PAD_GPIO39]    = { 0x2b0, 11, 2 },
++	[PAD_GPIO40]    = { 0x2b0, 20, 2 },
++	[PAD_GPIO41]    = { 0x2b0, 23, 2 },
++	[PAD_GPIO42]    = { 0x2b0, 26, 2 },
++	[PAD_GPIO43]    = { 0x2b0, 29, 2 },
++	[PAD_GPIO44]    = { 0x2b4,  0, 2 },
++	[PAD_GPIO45]    = { 0x2b4,  3, 2 },
++	[PAD_GPIO46]    = { 0x2b4,  6, 2 },
++	[PAD_GPIO47]    = { 0x2b4,  9, 2 },
++	[PAD_GPIO48]    = { 0x2b4, 12, 2 },
++	[PAD_GPIO49]    = { 0x2b0, 14, 2 },
++	[PAD_GPIO50]    = { 0x2b0, 17, 2 },
++};
++
++static void jh7110_set_function(struct udevice *dev,
++				unsigned int pin, u32 func)
++{
++	const struct jh7110_func_sel *fs = &jh7110_sys_func_sel[pin];
++	struct starfive_pinctrl_priv *priv = dev_get_priv(dev);
++	void __iomem *reg;
++	u32 mask;
++
++	if (!fs->offset)
++		return;
++
++	if (func > fs->max)
++		return;
++
++	reg = priv->base + fs->offset;
++	func = func << fs->shift;
++	mask = 0x3U << fs->shift;
++
++	func |= readl(reg) & ~mask;
++	writel(func, reg);
++}
++
++static void jh7110_set_vin_group(struct udevice *dev, unsigned int pin)
++{
++	const struct jh7110_vin_group_sel *gs =
++		&jh7110_sys_vin_group_sel[pin];
++	struct starfive_pinctrl_priv *priv = dev_get_priv(dev);
++	void __iomem *reg;
++	u32 mask;
++	u32 grp;
++
++	if (!gs->offset)
++		return;
++
++	reg = priv->base + gs->offset;
++	grp = gs->group << gs->shift;
++	mask = 0x3U << gs->shift;
++
++	grp |= readl(reg) & ~mask;
++	writel(grp, reg);
++}
++
++static int jh7110_sys_set_one_pin_mux(struct udevice *dev, unsigned int pin,
++				      unsigned int din, u32 dout, u32 doen, u32 func)
++{
++	struct starfive_pinctrl_priv *priv = dev_get_priv(dev);
++
++	if (pin < priv->info->ngpios && func == 0)
++		starfive_set_gpiomux(dev, pin, din, dout, doen);
++
++	jh7110_set_function(dev, pin, func);
++
++	if (pin < priv->info->ngpios && func == 2)
++		jh7110_set_vin_group(dev, pin);
++
++	return 0;
++}
++
++static int jh7110_sys_get_padcfg_base(struct udevice *dev,
++				      unsigned int pin)
++{
++	if (pin < PAD_GMAC1_MDC)
++		return SYS_GPO_PDA_0_74_CFG;
++	else if (pin > PAD_GMAC1_TXC && pin <= PAD_QSPI_DATA3)
++		return SYS_GPO_PDA_89_94_CFG;
++	else
++		return -1;
++}
++
++static void jh7110_sys_init_hw(struct udevice *dev)
++{
++	struct starfive_pinctrl_priv *priv = dev_get_priv(dev);
++
++	/* mask all GPIO interrupts */
++	writel(0U, priv->base + JH7110_SYS_GPIOIE0);
++	writel(0U, priv->base + JH7110_SYS_GPIOIE1);
++	/* clear edge interrupt flags */
++	writel(~0U, priv->base + JH7110_SYS_GPIOIC0);
++	writel(~0U, priv->base + JH7110_SYS_GPIOIC1);
++	/* enable GPIO interrupts */
++	writel(1U, priv->base + JH7110_SYS_GPIOEN);
++}
++
++const struct starfive_pinctrl_soc_info jh7110_sys_pinctrl_info = {
++	/* pin conf */
++	.set_one_pinmux = jh7110_sys_set_one_pin_mux,
++	.get_padcfg_base = jh7110_sys_get_padcfg_base,
++
++	/* gpio dout/doen/din/gpioinput register */
++	.dout_reg_base = JH7110_SYS_DOUT,
++	.dout_mask = GENMASK(6, 0),
++	.doen_reg_base = JH7110_SYS_DOEN,
++	.doen_mask = GENMASK(5, 0),
++	.gpi_reg_base = JH7110_SYS_GPI,
++	.gpi_mask = GENMASK(6, 0),
++	.gpioin_reg_base = JH7110_SYS_GPIOIN,
++
++	/* gpio */
++	.gpio_bank_name = "GPIO",
++	.ngpios = JH7110_SYS_NGPIO,
++	.gpio_init_hw = jh7110_sys_init_hw,
++};
++
++static int jh7110_sys_pinctrl_probe(struct udevice *dev)
++{
++	struct starfive_pinctrl_soc_info *info =
++		(struct starfive_pinctrl_soc_info *)dev_get_driver_data(dev);
++
++	return starfive_pinctrl_probe(dev, info);
++}
++
++static const struct udevice_id jh7110_sys_pinctrl_ids[] = {
++	/* JH7110 sys pinctrl */
++	{ .compatible = "starfive,jh7110-sys-pinctrl",
++	  .data = (ulong)&jh7110_sys_pinctrl_info, },
++	{ /* sentinel */ }
++};
++
++U_BOOT_DRIVER(jh7110_sys_pinctrl) = {
++	.name		= "jh7110-sys-pinctrl",
++	.id		= UCLASS_PINCTRL,
++	.of_match	= jh7110_sys_pinctrl_ids,
++	.priv_auto	= sizeof(struct starfive_pinctrl_priv),
++	.ops		= &starfive_pinctrl_ops,
++	.probe		= jh7110_sys_pinctrl_probe,
++};
+--- /dev/null
++++ b/drivers/pinctrl/starfive/pinctrl-starfive.c
+@@ -0,0 +1,428 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Pinctrl / GPIO driver for StarFive JH7100 SoC
++ *
++ * Copyright (C) 2022 Shanghai StarFive Technology Co., Ltd.
++ *   Author: Lee Kuan Lim <kuanlim.lee@starfivetech.com>
++ *   Author: Jianlong Huang <jianlong.huang@starfivetech.com>
++ */
++
++#include <common.h>
++#include <clk.h>
++#include <dm.h>
++#include <dm/device-internal.h>
++#include <dm/lists.h>
++#include <dm/pinctrl.h>
++#include <asm-generic/gpio.h>
++#include <linux/bitops.h>
++#include <linux/io.h>
++#include <linux/ioport.h>
++#include <dm/device_compat.h>
++
++#include <dt-bindings/pinctrl/pinctrl-starfive-jh7110.h>
++#include "pinctrl-starfive.h"
++
++/* pad control bits */
++#define STARFIVE_PADCFG_POS	BIT(7)
++#define STARFIVE_PADCFG_SMT	BIT(6)
++#define STARFIVE_PADCFG_SLEW	BIT(5)
++#define STARFIVE_PADCFG_PD	BIT(4)
++#define STARFIVE_PADCFG_PU	BIT(3)
++#define STARFIVE_PADCFG_BIAS	(STARFIVE_PADCFG_PD | STARFIVE_PADCFG_PU)
++#define STARFIVE_PADCFG_DS_MASK	GENMASK(2, 1)
++#define STARFIVE_PADCFG_DS_2MA	(0U << 1)
++#define STARFIVE_PADCFG_DS_4MA	BIT(1)
++#define STARFIVE_PADCFG_DS_8MA	(2U << 1)
++#define STARFIVE_PADCFG_DS_12MA	(3U << 1)
++#define STARFIVE_PADCFG_IE	BIT(0)
++#define GPIO_NUM_PER_WORD	32
++
++/*
++ * The packed pinmux values from the device tree look like this:
++ *
++ *  | 31 - 24 | 23 - 16 | 15 - 10 |  9 - 8   | 7 - 0 |
++ *  |   din   |  dout   |  doen   | function |  pin  |
++ */
++static unsigned int starfive_pinmux_din(u32 v)
++{
++	return (v & GENMASK(31, 24)) >> 24;
++}
++
++static u32 starfive_pinmux_dout(u32 v)
++{
++	return (v & GENMASK(23, 16)) >> 16;
++}
++
++static u32 starfive_pinmux_doen(u32 v)
++{
++	return (v & GENMASK(15, 10)) >> 10;
++}
++
++static u32 starfive_pinmux_function(u32 v)
++{
++	return (v & GENMASK(9, 8)) >> 8;
++}
++
++static unsigned int starfive_pinmux_pin(u32 v)
++{
++	return v & GENMASK(7, 0);
++}
++
++void starfive_set_gpiomux(struct udevice *dev, unsigned int pin,
++			  unsigned int din, u32 dout, u32 doen)
++{
++	struct starfive_pinctrl_priv *priv = dev_get_priv(dev);
++	const struct starfive_pinctrl_soc_info *info = priv->info;
++
++	unsigned int offset = 4 * (pin / 4);
++	unsigned int shift  = 8 * (pin % 4);
++	u32 dout_mask = info->dout_mask << shift;
++	u32 done_mask = info->doen_mask << shift;
++	u32 ival, imask;
++	void __iomem *reg_dout;
++	void __iomem *reg_doen;
++	void __iomem *reg_din;
++
++	reg_dout = priv->base + info->dout_reg_base + offset;
++	reg_doen = priv->base + info->doen_reg_base + offset;
++	dout <<= shift;
++	doen <<= shift;
++	if (din != GPI_NONE) {
++		unsigned int ioffset = 4 * (din / 4);
++		unsigned int ishift  = 8 * (din % 4);
++
++		reg_din = priv->base + info->gpi_reg_base + ioffset;
++		ival = (pin + 2) << ishift;
++		imask = info->gpi_mask << ishift;
++	} else {
++		reg_din = NULL;
++	}
++
++	dout |= readl(reg_dout) & ~dout_mask;
++	writel(dout, reg_dout);
++	doen |= readl(reg_doen) & ~done_mask;
++	writel(doen, reg_doen);
++	if (reg_din) {
++		ival |= readl(reg_din) & ~imask;
++		writel(ival, reg_din);
++	}
++}
++
++static int starfive_pinctrl_set_state_subnode(struct udevice *dev,
++					      ofnode node)
++{
++	struct starfive_pinctrl_priv *priv = dev_get_priv(dev);
++	struct starfive_pinctrl_soc_info *info = priv->info;
++	int ret, i;
++	int npins;
++	u32 *pinmux;
++
++	npins = ofnode_read_size(node, "pinmux") / sizeof(u32);
++	if (npins < 1)
++		return -EINVAL;
++
++	pinmux = kcalloc(npins, sizeof(*pinmux), GFP_KERNEL);
++	if (!pinmux)
++		return -ENOMEM;
++
++	ret = ofnode_read_u32_array(node, "pinmux", pinmux, npins);
++	if (ret < 0)
++		return ret;
++
++	for (i = 0; i < npins; i++) {
++		u32 v = pinmux[i];
++
++		if (info->set_one_pinmux)
++			info->set_one_pinmux(dev,
++				starfive_pinmux_pin(v),
++				starfive_pinmux_din(v),
++				starfive_pinmux_dout(v),
++				starfive_pinmux_doen(v),
++				starfive_pinmux_function(v));
++	}
++
++	return 0;
++}
++
++/*
++ * starfive_pinctrl_set_state: configure a pin state.
++ * @dev: pin controller device
++ * @config: pseudo device pointing to config node
++ */
++int starfive_pinctrl_set_state(struct udevice *dev, struct udevice *config)
++{
++	ofnode node;
++	int ret;
++
++	dev_for_each_subnode(node, config) {
++		ret = starfive_pinctrl_set_state_subnode(dev, node);
++		if (ret)
++			return ret;
++	}
++
++	return 0;
++}
++
++static const struct pinconf_param starfive_pinconf_params[] = {
++	{ "bias-disable",	PIN_CONFIG_BIAS_DISABLE,	0 },
++	{ "bias-pull-up",	PIN_CONFIG_BIAS_PULL_UP,	1 },
++	{ "bias-pull-down",	PIN_CONFIG_BIAS_PULL_DOWN,	1 },
++	{ "drive-strength",	PIN_CONFIG_DRIVE_STRENGTH,	0 },
++	{ "input-schmitt-enable",  PIN_CONFIG_INPUT_SCHMITT_ENABLE, 1 },
++	{ "input-schmitt-disable", PIN_CONFIG_INPUT_SCHMITT_ENABLE, 0 },
++	{ "input-enable",	PIN_CONFIG_INPUT_ENABLE,	1 },
++	{ "input-disable",	PIN_CONFIG_INPUT_ENABLE,	0 },
++	{ "slew-rate",		PIN_CONFIG_SLEW_RATE,		0 },
++};
++
++static const u8 starfive_drive_strength_mA[4] = { 2, 4, 8, 12 };
++
++static u32 starfive_padcfg_ds_from_mA(u32 v)
++{
++	int i;
++
++	for (i = 0; i < 3; i++) {
++		if (v <= starfive_drive_strength_mA[i])
++			break;
++	}
++	return i << 1;
++}
++
++static void starfive_padcfg_rmw(struct udevice *dev,
++				unsigned int pin, u32 mask, u32 value)
++{
++	struct starfive_pinctrl_priv *priv = dev_get_priv(dev);
++	struct starfive_pinctrl_soc_info *info = priv->info;
++	void __iomem *reg;
++	int padcfg_base;
++
++	if (!info->get_padcfg_base)
++		return;
++
++	padcfg_base = info->get_padcfg_base(dev, pin);
++	if (padcfg_base < 0)
++		return;
++
++	reg = priv->base + padcfg_base + 4 * pin;
++	value &= mask;
++
++	value |= readl(reg) & ~mask;
++	writel(value, reg);
++}
++
++static int starfive_pinconf_set(struct udevice *dev, unsigned int pin,
++				unsigned int param, unsigned int arg)
++{
++	u16 mask = 0;
++	u16 value = 0;
++
++	switch (param) {
++	case PIN_CONFIG_BIAS_DISABLE:
++		mask |= STARFIVE_PADCFG_BIAS;
++		value &= ~STARFIVE_PADCFG_BIAS;
++		break;
++	case PIN_CONFIG_BIAS_PULL_DOWN:
++		if (arg == 0)
++			return -EINVAL;
++		mask |= STARFIVE_PADCFG_BIAS;
++		value = (value & ~STARFIVE_PADCFG_BIAS) | STARFIVE_PADCFG_PD;
++		break;
++	case PIN_CONFIG_BIAS_PULL_UP:
++		if (arg == 0)
++			return -EINVAL;
++		mask |= STARFIVE_PADCFG_BIAS;
++		value = (value & ~STARFIVE_PADCFG_BIAS) | STARFIVE_PADCFG_PU;
++		break;
++	case PIN_CONFIG_DRIVE_STRENGTH:
++		mask |= STARFIVE_PADCFG_DS_MASK;
++		value = (value & ~STARFIVE_PADCFG_DS_MASK) |
++			starfive_padcfg_ds_from_mA(arg);
++		break;
++	case PIN_CONFIG_INPUT_ENABLE:
++		mask |= STARFIVE_PADCFG_IE;
++		if (arg)
++			value |= STARFIVE_PADCFG_IE;
++		else
++			value &= ~STARFIVE_PADCFG_IE;
++		break;
++	case PIN_CONFIG_INPUT_SCHMITT_ENABLE:
++		mask |= STARFIVE_PADCFG_SMT;
++		if (arg)
++			value |= STARFIVE_PADCFG_SMT;
++		else
++			value &= ~STARFIVE_PADCFG_SMT;
++		break;
++	case PIN_CONFIG_SLEW_RATE:
++		mask |= STARFIVE_PADCFG_SLEW;
++		if (arg)
++			value |= STARFIVE_PADCFG_SLEW;
++		else
++			value &= ~STARFIVE_PADCFG_SLEW;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	starfive_padcfg_rmw(dev, pin, mask, value);
++
++	return 0;
++}
++
++const struct pinctrl_ops starfive_pinctrl_ops = {
++	.set_state = starfive_pinctrl_set_state,
++	.pinconf_num_params	= ARRAY_SIZE(starfive_pinconf_params),
++	.pinconf_params		= starfive_pinconf_params,
++	.pinconf_set		= starfive_pinconf_set,
++};
++
++static int starfive_gpio_direction_input(struct udevice *dev, unsigned int off)
++{
++	struct udevice *pdev = dev->parent;
++	struct starfive_pinctrl_priv *priv = dev_get_priv(dev);
++	struct starfive_pinctrl_soc_info *info = priv->info;
++
++	/* enable input and schmitt trigger */
++	starfive_padcfg_rmw(pdev, off,
++			    STARFIVE_PADCFG_IE | STARFIVE_PADCFG_SMT,
++			    STARFIVE_PADCFG_IE | STARFIVE_PADCFG_SMT);
++
++	if (info->set_one_pinmux)
++		info->set_one_pinmux(pdev, off,
++				GPI_NONE, GPOUT_LOW, GPOEN_DISABLE, 0);
++
++	return 0;
++}
++
++static int starfive_gpio_direction_output(struct udevice *dev,
++					  unsigned int off, int val)
++{
++	struct udevice *pdev = dev->parent;
++	struct starfive_pinctrl_priv *priv = dev_get_priv(dev);
++	struct starfive_pinctrl_soc_info *info = priv->info;
++
++	if (info->set_one_pinmux)
++		info->set_one_pinmux(pdev, off,
++				GPI_NONE, val ? GPOUT_HIGH : GPOUT_LOW,
++				GPOEN_ENABLE, 0);
++
++	/* disable input, schmitt trigger and bias */
++	starfive_padcfg_rmw(pdev, off,
++			    STARFIVE_PADCFG_IE | STARFIVE_PADCFG_SMT
++			    | STARFIVE_PADCFG_BIAS,
++			    0);
++
++	return 0;
++}
++
++static int starfive_gpio_get_value(struct udevice *dev, unsigned int off)
++{
++	struct udevice *pdev = dev->parent;
++	struct starfive_pinctrl_priv *priv = dev_get_priv(pdev);
++	struct starfive_pinctrl_soc_info *info = priv->info;
++
++	void __iomem *reg = priv->base + info->gpioin_reg_base
++			+ 4 * (off / GPIO_NUM_PER_WORD);
++
++	return !!(readl(reg) & BIT(off % GPIO_NUM_PER_WORD));
++}
++
++static int starfive_gpio_set_value(struct udevice *dev,
++				   unsigned int off, int val)
++{
++	struct udevice *pdev = dev->parent;
++	struct starfive_pinctrl_priv *priv = dev_get_priv(pdev);
++	struct starfive_pinctrl_soc_info *info = priv->info;
++
++	unsigned int offset = 4 * (off / 4);
++	unsigned int shift  = 8 * (off % 4);
++	void __iomem *reg_dout = priv->base + info->dout_reg_base + offset;
++	u32 dout = (val ? GPOUT_HIGH : GPOUT_LOW) << shift;
++	u32 mask = info->dout_mask << shift;
++
++	dout |= readl(reg_dout) & ~mask;
++	writel(dout, reg_dout);
++
++	return 0;
++}
++
++static int starfive_gpio_probe(struct udevice *dev)
++{
++	struct gpio_dev_priv *uc_priv;
++	struct udevice *pdev = dev->parent;
++	struct starfive_pinctrl_priv *priv = dev_get_priv(pdev);
++	struct starfive_pinctrl_soc_info *info = priv->info;
++
++	uc_priv = dev_get_uclass_priv(dev);
++	uc_priv->bank_name = info->gpio_bank_name;
++	uc_priv->gpio_count = info->ngpios;
++
++	if (!info->gpio_init_hw)
++		return -ENXIO;
++
++	info->gpio_init_hw(pdev);
++
++	return 0;
++}
++
++static const struct dm_gpio_ops starfive_gpio_ops = {
++	.direction_input = starfive_gpio_direction_input,
++	.direction_output = starfive_gpio_direction_output,
++	.get_value = starfive_gpio_get_value,
++	.set_value = starfive_gpio_set_value,
++};
++
++static struct driver starfive_gpio_driver = {
++	.name = "starfive_gpio",
++	.id = UCLASS_GPIO,
++	.probe = starfive_gpio_probe,
++	.ops = &starfive_gpio_ops,
++};
++
++static int starfive_gpiochip_register(struct udevice *parent)
++{
++	struct uclass_driver *drv;
++	struct udevice *dev;
++	int ret;
++	ofnode node;
++
++	drv = lists_uclass_lookup(UCLASS_GPIO);
++	if (!drv)
++		return -ENOENT;
++
++	node = dev_ofnode(parent);
++	ret = device_bind_with_driver_data(parent, &starfive_gpio_driver,
++					   "starfive_gpio", 0, node, &dev);
++
++	if (ret)
++		return ret;
++
++	return 0;
++}
++
++int starfive_pinctrl_probe(struct udevice *dev,
++			   const struct starfive_pinctrl_soc_info *info)
++{
++	struct starfive_pinctrl_priv *priv = dev_get_priv(dev);
++	int ret;
++
++	/* Bind pinctrl_info from .data to priv */
++	priv->info =
++		(struct starfive_pinctrl_soc_info *)dev_get_driver_data(dev);
++
++	if (!priv->info)
++		return -EINVAL;
++
++	priv->base = dev_read_addr_ptr(dev);
++	if (IS_ERR(priv->base))
++		return PTR_ERR(priv->base);
++
++	/* gpiochip register */
++	ret = starfive_gpiochip_register(dev);
++	if (ret)
++		return ret;
++
++	dev_info(dev, "StarFive GPIO chip registered %d GPIOs\n",
++		 priv->info->ngpios);
++
++	return 0;
++}
+--- /dev/null
++++ b/drivers/pinctrl/starfive/pinctrl-starfive.h
+@@ -0,0 +1,55 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Pinctrl / GPIO driver for StarFive SoC
++ *
++ * Copyright (C) 2022 Shanghai StarFive Technology Co., Ltd.
++ *   Author: Lee Kuan Lim <kuanlim.lee@starfivetech.com>
++ *   Author: Jianlong Huang <jianlong.huang@starfivetech.com>
++ */
++
++#define STARFIVE_PINCTRL(a, b) { .number = a, .name = b }
++
++extern const struct pinctrl_ops starfive_pinctrl_ops;
++
++struct starfive_pinctrl_pin {
++	unsigned int number;
++	const char *name;
++};
++
++struct starfive_pinctrl_soc_info {
++	/* pinctrl */
++	int (*set_one_pinmux)(struct udevice *dev, unsigned int pin,
++			      unsigned int din, u32 dout, u32 doen, u32 func);
++	int (*get_padcfg_base)(struct udevice *dev,
++			       unsigned int pin);
++
++	/* gpio dout/doen/din/gpioinput register */
++	unsigned int dout_reg_base;
++	unsigned int dout_mask;
++	unsigned int doen_reg_base;
++	unsigned int doen_mask;
++	unsigned int gpi_reg_base;
++	unsigned int gpi_mask;
++	unsigned int gpioin_reg_base;
++
++	/* gpio */
++	const char *gpio_bank_name;
++	int ngpios;
++	void (*gpio_init_hw)(struct udevice *dev);
++};
++
++/*
++ * struct starfive_pinctrl_priv - private data for Starfive pinctrl driver
++ *
++ * @padctl_base: base address of the pinctrl device
++ * @info: SoC specific data & function
++ */
++struct starfive_pinctrl_priv {
++	void __iomem *base;
++	struct starfive_pinctrl_soc_info *info;
++};
++
++void starfive_set_gpiomux(struct udevice *dev, unsigned int pin,
++			  unsigned int din, u32 dout, u32 doen);
++int starfive_pinctrl_probe(struct udevice *dev,
++			   const struct starfive_pinctrl_soc_info *info);
+--- /dev/null
++++ b/drivers/ram/starfive/Kconfig
+@@ -0,0 +1,5 @@
++config SPL_STARFIVE_DDR
++	bool "StarFive DDR driver in SPL"
++	depends on SPL_RAM && STARFIVE_JH7110
++	help
++	  This enables DDR support for the platforms based on StarFive JH7110 SoC.
+--- /dev/null
++++ b/drivers/ram/starfive/Makefile
+@@ -0,0 +1,11 @@
++# SPDX-License-Identifier: GPL-2.0+
++#
++# Copyright (c) 2022 StarFive, Inc
++#
++ifdef CONFIG_SPL_BUILD
++obj-$(CONFIG_SPL_STARFIVE_DDR) += ddrphy_start.o
++obj-$(CONFIG_SPL_STARFIVE_DDR) += ddrphy_train.o
++obj-$(CONFIG_SPL_STARFIVE_DDR) += starfive_ddr.o
++obj-$(CONFIG_SPL_STARFIVE_DDR) += ddrphy_utils.o
++obj-$(CONFIG_SPL_STARFIVE_DDR) += ddrcsr_boot.o
++endif
+\ No newline at end of file
+--- /dev/null
++++ b/drivers/ram/starfive/ddrcsr_boot.c
+@@ -0,0 +1,339 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ * Author: Yanhong Wang<yanhong.wang@starfivetech.com>
++ */
++
++#include <common.h>
++#include <asm/io.h>
++#include <asm/arch/regs.h>
++#include <linux/delay.h>
++#include <wait_bit.h>
++
++#include "starfive_ddr.h"
++
++#define REGOFFSET(offset)	((offset) / 4)
++
++static const struct ddr_reg_cfg ddr_csr_cfg[] = {
++	{0x0,		0x0,	0x00000001,	REGSETALL},
++	{0xf00,		0x0,	0x40001030,	(OFFSET_SEL | F_SET | REG4G | REG8G)},
++	{0xf00,		0x0,	0x40001030,	(OFFSET_SEL | F_SET | REG2G)},
++	{0xf04,		0x0,	0x00000001,	(OFFSET_SEL | F_SET | REG4G | REG8G)},
++	{0xf04,		0x0,	0x00800001,	(OFFSET_SEL | F_SET | REG2G)},
++	{0xf10,		0x0,	0x00400000,	(OFFSET_SEL | REGSETALL)},
++	{0xf14,		0x0,	0x043fffff,	(OFFSET_SEL | REGSETALL)},
++	{0xf18,		0x0,	0x00000000,	(OFFSET_SEL | REGSETALL)},
++	{0xf30,		0x0,	0x1f000041,	(OFFSET_SEL | REGSETALL)},
++	{0xf34,		0x0,	0x1f000041,	(OFFSET_SEL | F_SET | REG4G | REG8G)},
++	{0x110,		0x0,	0xc0000001,	(OFFSET_SEL | REGSETALL)},
++	{0x114,		0x0,	0xffffffff,	(OFFSET_SEL | REGSETALL)},
++	{0x10c,		0x0,	0x00000505,	REGSETALL},
++	{0x11c,		0x0,	0x00000000,	REGSETALL},
++	{0x500,		0x0,	0x00000201,	REGSETALL},
++	{0x514,		0x0,	0x00000100,	REGSETALL},
++	{0x6a8,		0x0,	0x00040000,	REGSETALL},
++	{0xea8,		0x0,	0x00040000,	REGSETALL},
++	{0x504,		0x0,	0x40000000,	REGSETALL}
++};
++
++static const struct ddr_reg_cfg ddr_csr_cfg1[] = {
++	{0x310,		0x0,	0x00020000,	REGSETALL},
++	{0x310,		0x0,	0x00020001,	REGSETALL},
++	{0x600,		0x0,	0x002e0176,	REGSETALL},
++	{0x604,		0x0,	0x002e0176,	REGSETALL},
++	{0x608,		0x0,	0x001700bb,	REGSETALL},
++	{0x60c,		0x0,	0x000b005d,	REGSETALL},
++	{0x610,		0x0,	0x0005002e,	REGSETALL},
++	{0x614,		0x0,	0x00020017,	REGSETALL},
++	{0x618,		0x0,	0x00020017,	REGSETALL},
++	{0x61c,		0x0,	0x00020017,	REGSETALL},
++	{0x678,		0x0,	0x00000019,	REGSETALL},
++	{0x100,		0x0,	0x000000f8,	REGSETALL},
++	{0x620,		0x0,	0x03030404,	REGSETALL},
++	{0x624,		0x0,	0x04030505,	REGSETALL},
++	{0x628,		0x0,	0x07030884,	REGSETALL},
++	{0x62c,		0x0,	0x13150401,	REGSETALL},
++	{0x630,		0x0,	0x17150604,	REGSETALL},
++	{0x634,		0x0,	0x00110000,	REGSETALL},
++	{0x638,		0x0,	0x200a0a08,	REGSETALL},
++	{0x63c,		0x0,	0x1730f803,	REGSETALL},
++	{0x640,		0x0,	0x000a0c00,	REGSETALL},
++	{0x644,		0x0,	0xa005000a,	REGSETALL},
++	{0x648,		0x0,	0x00000000,	REGSETALL},
++	{0x64c,		0x0,	0x00081306,	REGSETALL},
++	{0x650,		0x0,	0x04070304,	REGSETALL},
++	{0x654,		0x0,	0x00000404,	REGSETALL},
++	{0x658,		0x0,	0x00000060,	REGSETALL},
++	{0x65c,		0x0,	0x00030008,	REGSETALL},
++	{0x660,		0x0,	0x00000000,	REGSETALL},
++	{0x680,		0x0,	0x00000603,	REGSETALL},
++	{0x684,		0x0,	0x01000202,	REGSETALL},
++	{0x688,		0x0,	0x0413040d,	REGSETALL},
++	{0x68c,		0x0,	0x20002420,	REGSETALL},
++	{0x690,		0x0,	0x00140000,	REGSETALL},
++	{0x69c,		0x0,	0x01240074,	REGSETALL},
++	{0x6a0,		0x0,	0x00000000,	REGSETALL},
++	{0x6a4,		0x0,	0x20240c00,	REGSETALL},
++	{0x6a8,		0x0,	0x00040000,	REGSETALL},
++	{0x4,		0x0,	0x30010006,	(F_SET | REG4G | REG8G)},
++	{0x4,		0x0,	0x10010006,	(F_SET | REG2G)},
++	{0xc,		0x0,	0x00000002,	REGSETALL},
++	{0x4,		0x0,	0x30020000,	(F_SET | REG4G | REG8G)},
++	{0x4,		0x0,	0x10020000,	(F_SET | REG2G)},
++	{0xc,		0x0,	0x00000002,	REGSETALL},
++	{0x4,		0x0,	0x30030031,	(F_SET | REG4G | REG8G)},
++	{0x4,		0x0,	0x10030031,	(F_SET | REG2G)},
++	{0xc,		0x0,	0x00000002,	REGSETALL},
++	{0x4,		0x0,	0x300b0033,	(F_SET | REG4G | REG8G)},
++	{0x4,		0x0,	0x100b0033,	(F_SET | REG2G)},
++	{0xc,		0x0,	0x00000002,	REGSETALL},
++	{0x4,		0x0,	0x30160016,	(F_SET | REG4G | REG8G)},
++	{0x4,		0x0,	0x10160016,	(F_SET | REG2G)},
++	{0xc,		0x0,	0x00000002,	REGSETALL},
++	{0x10,		0x0,	0x00000010,	REGSETALL},
++	{0x14,		0x0,	0x00000001,	REGSETALL},
++};
++
++static const struct ddr_reg_cfg ddr_csr_cfg2[] = {
++	{0xb8,		0xf0ffffff,		0x3000000,	REGCLRSETALL},
++	{0x84,		0xFEFFFFFF,		0x0,		REGCLRSETALL},
++	{0xb0,		0xFFFEFFFF,		0x0,		REGCLRSETALL},
++	{0xb0,		0xFEFFFFFF,		0x0,		REGCLRSETALL},
++	{0xb4,		0xffffffff,		0x1,		REGCLRSETALL},
++	{0x248,		0xffffffff,		0x3000000,	REGCLRSETALL},
++	{0x24c,		0xffffffff,		0x300,		REGCLRSETALL},
++	{0x24c,		0xffffffff,		0x3000000,	REGCLRSETALL},
++	{0xb0,		0xffffffff,		0x100,		REGCLRSETALL},
++	{0xb8,		0xFFF0FFFF,		0x30000,	REGCLRSETALL},
++	{0x84,		0xFFFEFFFF,		0x0,		REGCLRSETALL},
++	{0xac,		0xFFFEFFFF,		0x0,		REGCLRSETALL},
++	{0xac,		0xFEFFFFFF,		0x0,		REGCLRSETALL},
++	{0xb0,		0xffffffff,		0x1,		REGCLRSETALL},
++	{0x248,		0xffffffff,		0x30000,	REGCLRSETALL},
++	{0x24c,		0xffffffff,		0x3,		REGCLRSETALL},
++	{0x24c,		0xffffffff,		0x30000,	REGCLRSETALL},
++	{0x250,		0xffffffff,		0x3000000,	REGCLRSETALL},
++	{0x254,		0xffffffff,		0x3000000,	REGCLRSETALL},
++	{0x258,		0xffffffff,		0x3000000,	REGCLRSETALL},
++	{0xac,		0xffffffff,		0x100,		REGCLRSETALL},
++	{0x10c,		0xFFFFF0FF,		0x300,		REGCLRSETALL},
++	{0x110,		0xFFFFFEFF,		0x0,		REGCLRSETALL},
++	{0x11c,		0xFFFEFFFF,		0x0,		REGCLRSETALL},
++	{0x11c,		0xFEFFFFFF,		0x0,		REGCLRSETALL},
++	{0x120,		0xffffffff,		0x100,		REGCLRSETALL},
++	{0x2d0,		0xffffffff,		0x300,		REGCLRSETALL},
++	{0x2dc,		0xffffffff,		0x300,		REGCLRSETALL},
++	{0x2e8,		0xffffffff,		0x300,		REGCLRSETALL},
++};
++
++static const struct ddr_reg_cfg ddr_csr_cfg3[] = {
++	{0x100,		0x0,	0x000000e0,	REGSETALL},
++	{0x620,		0x0,	0x04041417,	REGSETALL},
++	{0x624,		0x0,	0x09110609,	REGSETALL},
++	{0x628,		0x0,	0x442d0994,	REGSETALL},
++	{0x62c,		0x0,	0x271e102b,	REGSETALL},
++	{0x630,		0x0,	0x291b140a,	REGSETALL},
++	{0x634,		0x0,	0x001c0000,	REGSETALL},
++	{0x638,		0x0,	0x200f0f08,	REGSETALL},
++	{0x63c,		0x0,	0x29420a06,	REGSETALL},
++	{0x640,		0x0,	0x019e1fc1,	REGSETALL},
++	{0x644,		0x0,	0x10cb0196,	REGSETALL},
++	{0x648,		0x0,	0x00000000,	REGSETALL},
++	{0x64c,		0x0,	0x00082714,	REGSETALL},
++	{0x650,		0x0,	0x16442f0d,	REGSETALL},
++	{0x654,		0x0,	0x00001916,	REGSETALL},
++	{0x658,		0x0,	0x00000060,	REGSETALL},
++	{0x65c,		0x0,	0x00600020,	REGSETALL},
++	{0x660,		0x0,	0x00000000,	REGSETALL},
++	{0x680,		0x0,	0x0c00040f,	REGSETALL},
++	{0x684,		0x0,	0x03000604,	REGSETALL},
++	{0x688,		0x0,	0x0515040d,	REGSETALL},
++	{0x68c,		0x0,	0x20002c20,	REGSETALL},
++	{0x690,		0x0,	0x00140000,	REGSETALL},
++	{0x69c,		0x0,	0x01240074,	REGSETALL},
++	{0x6a0,		0x0,	0x00000000,	REGSETALL},
++	{0x6a4,		0x0,	0x202c0c00,	REGSETALL},
++	{0x6a8,		0x0,	0x00040000,	REGSETALL},
++	{0x4,		0x0,	0x30010036,	(F_SET | REG4G | REG8G)},
++	{0x4,		0x0,	0x10010036,	(F_SET | REG2G)},
++	{0xc,		0x0,	0x00000002,	REGSETALL},
++	{0x4,		0x0,	0x3002001b,	(F_SET | REG4G | REG8G)},
++	{0x4,		0x0,	0x10010036,	(F_SET | REG2G)},
++	{0xc,		0x0,	0x00000002,	REGSETALL},
++	{0x4,		0x0,	0x30030031,	(F_SET | REG4G | REG8G)},
++	{0x4,		0x0,	0x10030031,	(F_SET | REG2G)},
++	{0xc,		0x0,	0x00000002,	REGSETALL},
++	{0x4,		0x0,	0x300b0066,	(F_SET | REG4G)},
++	{0x4,		0x0,	0x300b0036,	(F_SET | REG8G)},
++	{0x4,		0x0,	0x100b0066,	(F_SET | REG2G)},
++	{0xc,		0x0,	0x00000002,	REGSETALL},
++	{0x4,		0x0,	0x30160016,	(F_SET | REG4G | REG8G)},
++	{0x4,		0x0,	0x10160016,	(F_SET | REG2G)},
++	{0xc,		0x0,	0x00000002,	REGSETALL},
++	{0x410,		0x0,	0x00101010,	REGSETALL},
++	{0x420,		0x0,	0x0c181006,	REGSETALL},
++	{0x424,		0x0,	0x20200820,	REGSETALL},
++	{0x428,		0x0,	0x80000020,	REGSETALL},
++	{0x0,		0x0,	0x00000001,	REGSETALL},
++	{0x108,		0x0,	0x00003000,	REGSETALL},
++	{0x704,		0x0,	0x00000007,	REGSETALL | OFFSET_SEL},
++	{0x330,		0x0,	0x09313fff,	(F_SET | REG4G | REG8G)},
++	{0x330,		0x0,	0x09311fff,	(F_SET | REG2G)},
++	{0x508,		0x0,	0x00000033,	(F_SET | REG4G | REG8G)},
++	{0x508,		0x0,	0x00000013,	(F_SET | REG2G)},
++	{0x324,		0x0,	0x00002000,	REGSETALL},
++	{0x104,		0x0,	0x90000000,	REGSETALL},
++	{0x510,		0x0,	0x00000100,	REGSETALL},
++	{0x514,		0x0,	0x00000000,	REGSETALL},
++	{0x700,		0x0,	0x00000003,	REGSETALL | OFFSET_SEL},
++	{0x514,		0x0,	0x00000600,	REGSETALL},
++	{0x20,		0x0,	0x00000001,	REGSETALL},
++};
++
++static void ddr_csr_set(u32 *csrreg, u32 *secreg, const struct ddr_reg_cfg *data,
++			u32 len, u32 mask)
++{
++	u32 *addr;
++	u32 i;
++
++	for (i = 0; i < len; i++) {
++		if (!(data[i].flag & mask))
++			continue;
++
++		if (data[i].flag & OFFSET_SEL)
++			addr = secreg + REGOFFSET(data[i].offset);
++		else
++			addr = csrreg + REGOFFSET(data[i].offset);
++
++		if (data[i].flag & F_CLRSET)
++			DDR_REG_TRIGGER(addr, data[i].mask, data[i].val);
++		else
++			out_le32(addr, data[i].val);
++	}
++}
++
++void ddrcsr_boot(u32 *csrreg, u32 *secreg, u32 *phyreg, enum ddr_size_t size)
++{
++	u32 len;
++	u32 val;
++	u32 mask;
++	int ret;
++
++	switch (size) {
++	case DDR_SIZE_2G:
++		mask = REG2G;
++		break;
++
++	case DDR_SIZE_4G:
++		mask = REG4G;
++		break;
++
++	case DDR_SIZE_8G:
++		mask = REG8G;
++		break;
++
++	case DDR_SIZE_16G:
++	default:
++		return;
++	};
++
++	len = ARRAY_SIZE(ddr_csr_cfg);
++	ddr_csr_set(csrreg, secreg, ddr_csr_cfg, len, mask);
++
++	ret = wait_for_bit_le32(csrreg + REGOFFSET(0x504), BIT(31),
++				true, 1000, false);
++	if (ret)
++		return;
++
++	out_le32(csrreg + REGOFFSET(0x504), 0x0);
++	out_le32(csrreg + REGOFFSET(0x50c), 0x0);
++	udelay(300);
++	out_le32(csrreg + REGOFFSET(0x50c), 0x1);
++	mdelay(3);
++
++	switch (size) {
++	case DDR_SIZE_2G:
++		out_le32(csrreg + REGOFFSET(0x10), 0x1c);
++		break;
++
++	case DDR_SIZE_8G:
++	case DDR_SIZE_4G:
++		out_le32(csrreg + REGOFFSET(0x10), 0x3c);
++		break;
++
++	case DDR_SIZE_16G:
++	default:
++		break;
++	};
++
++	out_le32(csrreg + REGOFFSET(0x14), 0x1);
++	udelay(4);
++
++	len = ARRAY_SIZE(ddr_csr_cfg1);
++	ddr_csr_set(csrreg, secreg, ddr_csr_cfg1, len, mask);
++
++	udelay(4);
++	out_le32(csrreg + REGOFFSET(0x10), 0x11);
++	out_le32(csrreg + REGOFFSET(0x14), 0x1);
++
++	switch (size) {
++	case DDR_SIZE_4G:
++	case DDR_SIZE_8G:
++		out_le32(csrreg + REGOFFSET(0x10), 0x20);
++		out_le32(csrreg + REGOFFSET(0x14), 0x1);
++		udelay(4);
++		out_le32(csrreg + REGOFFSET(0x10), 0x21);
++		out_le32(csrreg + REGOFFSET(0x14), 0x1);
++		break;
++
++	case DDR_SIZE_2G:
++	case DDR_SIZE_16G:
++	default:
++		break;
++	};
++
++	out_le32(csrreg + REGOFFSET(0x514), 0x0);
++	ret = wait_for_bit_le32(csrreg + REGOFFSET(0x518), BIT(1),
++				true, 1000, false);
++	if (ret)
++		return;
++
++	val = in_le32(csrreg + REGOFFSET(0x518));
++	while ((val & 0x2) != 0x0) {
++		val = in_le32(phyreg + 1);
++
++		if ((val & 0x20) == 0x20) {
++			switch (val & 0x1f) {
++			case 0: /* ddrc_clock=12M */
++				DDR_REG_SET(BUS, DDR_BUS_OSC_DIV2);
++				break;
++			case 1: /* ddrc_clock=200M */
++				DDR_REG_SET(BUS, DDR_BUS_PLL1_DIV8);
++				break;
++			case 2: /* ddrc_clock=800M */
++				DDR_REG_SET(BUS, DDR_BUS_PLL1_DIV2);
++				break;
++			default:
++				break;
++			};
++
++			out_le32(phyreg + 2, 0x1);
++			ret = wait_for_bit_le32(phyreg + 2, BIT(0), false, 1000, false);
++			if (ret)
++				return;
++		}
++
++		udelay(1);
++		val = in_le32(csrreg + REGOFFSET(0x518));
++	};
++
++	val = in_le32(phyreg + 2048 + 83);
++	val = in_le32(phyreg + 2048 + 84);
++	out_le32(phyreg + 2048 + 84, val & 0xF8000000);
++
++	len = ARRAY_SIZE(ddr_csr_cfg2);
++	ddr_csr_set(phyreg + PHY_BASE_ADDR, secreg, ddr_csr_cfg2, len, mask);
++
++	len = ARRAY_SIZE(ddr_csr_cfg3);
++	ddr_csr_set(csrreg, secreg, ddr_csr_cfg3, len, mask);
++}
+--- /dev/null
++++ b/drivers/ram/starfive/ddrphy_start.c
+@@ -0,0 +1,279 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ * Author: Yanhong Wang<yanhong.wang@starfivetech.com>
++ */
++
++#include <common.h>
++#include <asm/io.h>
++
++#include "starfive_ddr.h"
++
++static const struct ddr_reg_cfg ddr_start_cfg[] = {
++	{89,	0xffffff00,	0x00000051,	(OFFSET_SEL | REGCLRSETALL)},
++	{78,	0xfffffcff,	0x0,		(OFFSET_SEL | REGCLRSETALL)},
++	{345,	0xffffff00,	0x00000051,	(OFFSET_SEL | REGCLRSETALL)},
++	{334,	0xfffffcff,	0x0,		(OFFSET_SEL | REGCLRSETALL)},
++	{601,	0xffffff00,	0x00000051,	(OFFSET_SEL | REGCLRSETALL)},
++	{590,	0xfffffcff,	0x0,		(OFFSET_SEL | REGCLRSETALL)},
++	{857,	0xffffff00,	0x00000051,	(OFFSET_SEL | REGCLRSETALL)},
++	{846,	0xfffffcff,	0x0,		(OFFSET_SEL | REGCLRSETALL)},
++	{1793,	0xfffffeff,	0x0,		(OFFSET_SEL | REGCLRSETALL)},
++	{1793,	0xfffcffff,	0x0,		(OFFSET_SEL | REGCLRSETALL)},
++	{125,	0xfff0ffff,	0x00010000,	(OFFSET_SEL | REGCLRSETALL)},
++	{102,	0xfffffffc,	0x00000001,	(OFFSET_SEL | REGCLRSETALL)},
++	{105,	0xffffffe0,	0x00000001,	(OFFSET_SEL | REGCLRSETALL)},
++	{92,	0xfffffffe,	0x00000001,	(OFFSET_SEL | REGCLRSETALL)},
++	{94,	0xffffe0ff,	0x00000200,	(OFFSET_SEL | REGCLRSETALL)},
++	{96,	0xfffff0ff,	0x00000400,	(OFFSET_SEL | REGCLRSETALL)},
++	{89,	0xffffff00,	0x00000051,	(OFFSET_SEL | REGCLRSETALL)},
++	{381,	0xfff0ffff,	0x00010000,	(OFFSET_SEL | REGCLRSETALL)},
++	{358,	0xfffffffc,	0x00000001,	(OFFSET_SEL | REGCLRSETALL)},
++	{361,	0xffffffe0,	0x00000001,	(OFFSET_SEL | REGCLRSETALL)},
++	{348,	0xfffffffe,	0x00000001,	(OFFSET_SEL | REGCLRSETALL)},
++	{350,	0xffffe0ff,	0x00000200,	(OFFSET_SEL | REGCLRSETALL)},
++	{352,	0xfffff0ff,	0x00000400,	(OFFSET_SEL | REGCLRSETALL)},
++	{345,	0xffffff00,	0x00000051,	(OFFSET_SEL | REGCLRSETALL)},
++	{637,	0xfff0ffff,	0x00010000,	(OFFSET_SEL | REGCLRSETALL)},
++	{614,	0xfffffffc,	0x00000001,	(OFFSET_SEL | REGCLRSETALL)},
++	{617,	0xffffffe0,	0x00000001,	(OFFSET_SEL | REGCLRSETALL)},
++	{604,	0xfffffffe,	0x00000001,	(OFFSET_SEL | REGCLRSETALL)},
++	{606,	0xffffe0ff,	0x00000200,	(OFFSET_SEL | REGCLRSETALL)},
++	{608,	0xfffff0ff,	0x00000400,	(OFFSET_SEL | REGCLRSETALL)},
++	{601,	0xffffff00,	0x00000051,	(OFFSET_SEL | REGCLRSETALL)},
++	{893,	0xfff0ffff,	0x00010000,	(OFFSET_SEL | REGCLRSETALL)},
++	{870,	0xfffffffc,	0x00000001,	(OFFSET_SEL | REGCLRSETALL)},
++	{873,	0xffffffe0,	0x00000001,	(OFFSET_SEL | REGCLRSETALL)},
++	{860,	0xfffffffe,	0x00000001,	(OFFSET_SEL | REGCLRSETALL)},
++	{862,	0xffffe0ff,	0x00000200,	(OFFSET_SEL | REGCLRSETALL)},
++	{864,	0xfffff0ff,	0x00000400,	(OFFSET_SEL | REGCLRSETALL)},
++	{857,	0xffffff00,	0x00000051,	(OFFSET_SEL | REGCLRSETALL)},
++	{1895,	0xffffe000,	0x00001342,	(OFFSET_SEL | REGCLRSETALL)},
++	{1835,	0xfffff0ff,	0x00000200,	(OFFSET_SEL | REGCLRSETALL)},
++	{1793,	0xfffffeff,	0x00000100,	(OFFSET_SEL | REGCLRSETALL)},
++	{62,	0xfffffeff,	0x0,		REGCLRSETALL},
++	{66,	0xfffffeff,	0x0,		REGCLRSETALL},
++	{166,	0xffffff80,	0x00000001,	REGCLRSETALL},
++	{62,	0xfff0ffff,	0x00010000,	REGCLRSETALL},
++	{62,	0xf0ffffff,	0x01000000,	REGCLRSETALL},
++	{166,	0xffff80ff,	0x00000100,	REGCLRSETALL},
++	{179,	0xff80ffff,	0x00010000,	REGCLRSETALL},
++	{67,	0xffe0ffff,	0x00010000,	REGCLRSETALL},
++	{67,	0xe0ffffff,	0x01000000,	REGCLRSETALL},
++	{179,	0x80ffffff,	0x01000000,	REGCLRSETALL},
++	{166,	0xff80ffff,	0x00010000,	REGCLRSETALL},
++	{62,	0xfff0ffff,	0x00010000,	REGCLRSETALL},
++	{62,	0xf0ffffff,	0x01000000,	REGCLRSETALL},
++	{166,	0x80ffffff,	0x01000000,	REGCLRSETALL},
++	{182,	0xff80ffff,	0x00010000,	REGCLRSETALL},
++	{67,	0xffe0ffff,	0x00010000,	REGCLRSETALL},
++	{67,	0xe0ffffff,	0x01000000,	REGCLRSETALL},
++	{182,	0x80ffffff,	0x01000000,	REGCLRSETALL},
++	{167,	0xffffff80,	0x00000017,	REGCLRSETALL},
++	{62,	0xfff0ffff,	0x00010000,	REGCLRSETALL},
++	{62,	0xf0ffffff,	0x01000000,	REGCLRSETALL},
++	{167,	0xffff80ff,	0x00001700,	REGCLRSETALL},
++	{185,	0xff80ffff,	0x00200000,	REGCLRSETALL},
++	{67,	0xffe0ffff,	0x00010000,	REGCLRSETALL},
++	{67,	0xe0ffffff,	0x01000000,	REGCLRSETALL},
++	{185,	0x80ffffff,	0x20000000,	REGCLRSETALL},
++	{10,	0xffffffe0,	0x00000002,	REGCLRSETALL},
++	{0,	0xfffffffe,	0x00000001,	REGCLRSETALL},
++	{11,	0xfffffff0,	0x00000005,	(F_CLRSET | REG2G)},
++	{247,	0xffffffff,	0x00000008,	REGCLRSETALL},
++	{249,	0xffffffff,	0x00000800,	REGCLRSETALL},
++	{252,	0xffffffff,	0x00000008,	REGCLRSETALL},
++	{254,	0xffffffff,	0x00000800,	REGCLRSETALL},
++	{281,	0xffffffff,	0x33000000,	REGCLRSETALL},
++	{305,	0xffffffff,	0x33000000,	REGCLRSETALL},
++	{329,	0xffffffff,	0x33000000,	REGCLRSETALL},
++	{353,	0xffffffff,	0x33000000,	REGCLRSETALL},
++	{289,	0xffffffff,	0x36000000,	(F_CLRSET | REG8G)},
++	{313,	0xffffffff,	0x36000000,	(F_CLRSET | REG8G)},
++	{337,	0xffffffff,	0x36000000,	(F_CLRSET | REG8G)},
++	{361,	0xffffffff,	0x36000000,	(F_CLRSET | REG8G)},
++	{289,	0xffffffff,	0x66000000,	(F_CLRSET | REG2G | REG4G)},
++	{313,	0xffffffff,	0x66000000,	(F_CLRSET | REG2G | REG4G)},
++	{337,	0xffffffff,	0x66000000,	(F_CLRSET | REG2G | REG4G)},
++	{361,	0xffffffff,	0x66000000,	(F_CLRSET | REG2G | REG4G)},
++	{282,	0xffffffff,	0x00160000,	REGCLRSETALL},
++	{306,	0xffffffff,	0x00160000,	REGCLRSETALL},
++	{330,	0xffffffff,	0x00160000,	REGCLRSETALL},
++	{354,	0xffffffff,	0x00160000,	REGCLRSETALL},
++	{290,	0xffffffff,	0x00160000,	REGCLRSETALL},
++	{314,	0xffffffff,	0x00160000,	REGCLRSETALL},
++	{338,	0xffffffff,	0x00160000,	REGCLRSETALL},
++	{362,	0xffffffff,	0x00160000,	REGCLRSETALL},
++	{282,	0xffffff00,	0x17,		REGCLRSETALL},
++	{306,	0xffffff00,	0x17,		REGCLRSETALL},
++	{330,	0xffffff00,	0x17,		REGCLRSETALL},
++	{354,	0xffffff00,	0x17,		REGCLRSETALL},
++	{290,	0xffffff00,	0x17,		REGCLRSETALL},
++	{314,	0xffffff00,	0x17,		REGCLRSETALL},
++	{338,	0xffffff00,	0x17,		REGCLRSETALL},
++	{362,	0xffffff00,	0x17,		REGCLRSETALL},
++	{282,	0xffff00ff,	0x2000,		REGCLRSETALL},
++	{306,	0xffff00ff,	0x2000,		REGCLRSETALL},
++	{330,	0xffff00ff,	0x2000,		REGCLRSETALL},
++	{354,	0xffff00ff,	0x2000,		REGCLRSETALL},
++	{290,	0xffff00ff,	0x2000,		REGCLRSETALL},
++	{314,	0xffff00ff,	0x2000,		REGCLRSETALL},
++	{338,	0xffff00ff,	0x2000,		REGCLRSETALL},
++	{362,	0xffff00ff,	0x2000,		REGCLRSETALL},
++	{65,	0xffffffff,	0x00000100,	(OFFSET_SEL | REGCLRSETALL)},
++	{321,	0xffffffff,	0x00000100,	(OFFSET_SEL | REGCLRSETALL)},
++	{577,	0xffffffff,	0x00000100,	(OFFSET_SEL | REGCLRSETALL)},
++	{833,	0xffffffff,	0x00000100,	(OFFSET_SEL | REGCLRSETALL)},
++	{96,	0x0,		0x300,		(OFFSET_SEL | REGADDSETALL)},
++	{352,	0x0,		0x300,		(OFFSET_SEL | REGADDSETALL)},
++	{608,	0x0,		0x300,		(OFFSET_SEL | REGADDSETALL)},
++	{864,	0x0,		0x300,		(OFFSET_SEL | REGADDSETALL)},
++	{96,	0xff00ffff,	0x00120000,	(OFFSET_SEL | REGCLRSETALL)},
++	{352,	0xff00ffff,	0x00120000,	(OFFSET_SEL | REGCLRSETALL)},
++	{608,	0xff00ffff,	0x00120000,	(OFFSET_SEL | REGCLRSETALL)},
++	{864,	0xff00ffff,	0x00120000,	(OFFSET_SEL | REGCLRSETALL)},
++	{33,	0xffffff00,	0x0040,		(OFFSET_SEL | REGCLRSETALL)},
++	{289,	0xffffff00,	0x0040,		(OFFSET_SEL | REGCLRSETALL)},
++	{545,	0xffffff00,	0x0040,		(OFFSET_SEL | REGCLRSETALL)},
++	{801,	0xffffff00,	0x0040,		(OFFSET_SEL | REGCLRSETALL)},
++	{1038,	0xfcffffff,	0x03000000,	(OFFSET_SEL | REGCLRSETALL)},
++	{1294,	0xfcffffff,	0x03000000,	(OFFSET_SEL | REGCLRSETALL)},
++	{1550,	0xfcffffff,	0x03000000,	(OFFSET_SEL | REGCLRSETALL)},
++	{83,	0xffc0ffff,	0x70000,	(OFFSET_SEL | REGCLRSETALL)},
++	{339,	0xffc0ffff,	0x70000,	(OFFSET_SEL | REGCLRSETALL)},
++	{595,	0xffc0ffff,	0x70000,	(OFFSET_SEL | REGCLRSETALL)},
++	{851,	0xffc0ffff,	0x70000,	(OFFSET_SEL | REGCLRSETALL)},
++	{1062,	0xf800ffff,	0x70000,	(OFFSET_SEL | REGCLRSETALL)},
++	{1318,	0xf800ffff,	0x70000,	(OFFSET_SEL | REGCLRSETALL)},
++	{1574,	0xf800ffff,	0x70000,	(OFFSET_SEL | REGCLRSETALL)},
++	{1892,	0xfffc0000,	0x15547,	(OFFSET_SEL | REGCLRSETALL)},
++	{1893,	0xfffc0000,	0x7,		(OFFSET_SEL | REGCLRSETALL)},
++	{1852,	0xffffe000,	0x07a,		(OFFSET_SEL | REGCLRSETALL)},
++	{1853,	0xffffffff,	0x0100,		(OFFSET_SEL | REGCLRSETALL)},
++	{1822,	0xffffffff,	0xFF,		(OFFSET_SEL | REGCLRSETALL)},
++	{1896,	0xfffffc00,	0x03d5,		(OFFSET_SEL | REGCLRSETALL)},
++	{91,	0xfc00ffff,	0x03d50000,	(OFFSET_SEL | REGCLRSETALL)},
++	{347,	0xfc00ffff,	0x03d50000,	(OFFSET_SEL | REGCLRSETALL)},
++	{603,	0xfc00ffff,	0x03d50000,	(OFFSET_SEL | REGCLRSETALL)},
++	{859,	0xfc00ffff,	0x03d50000,	(OFFSET_SEL | REGCLRSETALL)},
++	{1912,	0x0,		0xcc3bfc7,	(OFFSET_SEL | REGSETALL)},
++	{1913,	0x0,		0xff8f,		(OFFSET_SEL | REGSETALL)},
++	{1914,	0x0,		0x33f07ff,	(OFFSET_SEL | REGSETALL)},
++	{1915,	0x0,		0xc3c37ff,	(OFFSET_SEL | REGSETALL)},
++	{1916,	0x0,		0x1fffff10,	(OFFSET_SEL | REGSETALL)},
++	{1917,	0x0,		0x230070,	(OFFSET_SEL | REGSETALL)},
++	{1918,	0x0,		0x3ff7ffff,	(OFFSET_SEL | REG4G | REG2G | F_SET)},
++	{1918,	0x0,		0x3ff7ffff,	(OFFSET_SEL | REG8G | F_SET)},
++	{1919,	0x0,		0xe10,		(OFFSET_SEL | REGSETALL)},
++	{1920,	0x0,		0x1fffffff,	(OFFSET_SEL | REGSETALL)},
++	{1921,	0x0,		0x188411,	(OFFSET_SEL | REGSETALL)},
++	{1922,	0x0,		0x1fffffff,	(OFFSET_SEL | REGSETALL)},
++	{1923,	0x0,		0x180400,	(OFFSET_SEL | REGSETALL)},
++	{1924,	0x0,		0x1fffffff,	(OFFSET_SEL | REGSETALL)},
++	{1925,	0x0,		0x180400,	(OFFSET_SEL | REGSETALL)},
++	{1926,	0x0,		0x1fffffcf,	(OFFSET_SEL | REGSETALL)},
++	{1927,	0x0,		0x188400,	(OFFSET_SEL | REGSETALL)},
++	{1928,	0x0,		0x1fffffff,	(OFFSET_SEL | REGSETALL)},
++	{1929,	0x0,		0x4188411,	(OFFSET_SEL | REGSETALL)},
++	{1837,	0x0,		0x24410,	(OFFSET_SEL | REGSETALL)},
++	{1840,	0x0,		0x24410,	(OFFSET_SEL | REGSETALL)},
++	{1842,	0x0,		0x2ffff,	(OFFSET_SEL | REGSETALL)},
++	{76,	0xff0000f8,	0x00ff8f07,	(OFFSET_SEL | REGCLRSETALL)},
++	{332,	0xff0000f8,	0x00ff8f07,	(OFFSET_SEL | REGCLRSETALL)},
++	{588,	0xff0000f8,	0x00ff8f07,	(OFFSET_SEL | REGCLRSETALL)},
++	{844,	0xff0000f8,	0x00ff8f07,	(OFFSET_SEL | REGCLRSETALL)},
++	{77,	0xffff0000,	0xff8f,		(OFFSET_SEL | REGCLRSETALL)},
++	{333,	0xffff0000,	0xff8f,		(OFFSET_SEL | REGCLRSETALL)},
++	{589,	0xffff0000,	0xff8f,		(OFFSET_SEL | REGCLRSETALL)},
++	{845,	0xffff0000,	0xff8f,		(OFFSET_SEL | REGCLRSETALL)},
++	{1062,	0xffffff00,	0xff,		(OFFSET_SEL | REG4G | REG2G | F_CLRSET)},
++	{1318,	0xffffff00,	0xff,		(OFFSET_SEL | REG4G | REG2G | F_CLRSET)},
++	{1574,	0xffffff00,	0xff,		(OFFSET_SEL | REG4G | REG2G | F_CLRSET)},
++	{1062,	0xffffff00,	0xfb,		(OFFSET_SEL | REG8G | F_CLRSET)},
++	{1318,	0xffffff00,	0xfb,		(OFFSET_SEL | REG8G | F_CLRSET)},
++	{1574,	0xffffff00,	0xfb,		(OFFSET_SEL | REG8G | F_CLRSET)},
++	{1028,	0xffffffff,	0x1000000,	(OFFSET_SEL | REGCLRSETALL)},
++	{1284,	0xffffffff,	0x1000000,	(OFFSET_SEL | REGCLRSETALL)},
++	{1540,	0xffffffff,	0x1000000,	(OFFSET_SEL | REGCLRSETALL)},
++	{1848,	0x0,		0x3cf07f8,	(OFFSET_SEL | REGSETALL)},
++	{1849,	0x0,		0x3f,		(OFFSET_SEL | REGSETALL)},
++	{1850,	0x0,		0x1fffff,	(OFFSET_SEL | REGSETALL)},
++	{1851,	0x0,		0x060000,	(OFFSET_SEL | REGSETALL)},
++	{130,	0x0000ffff,	0xffff0000,	(OFFSET_SEL | REGCLRSETALL)},
++	{386,	0x0000ffff,	0xffff0000,	(OFFSET_SEL | REGCLRSETALL)},
++	{642,	0x0000ffff,	0xffff0000,	(OFFSET_SEL | REGCLRSETALL)},
++	{898,	0x0000ffff,	0xffff0000,	(OFFSET_SEL | REGCLRSETALL)},
++	{131,	0xfffffff0,	0xf,		(OFFSET_SEL | REGCLRSETALL)},
++	{387,	0xfffffff0,	0xf,		(OFFSET_SEL | REGCLRSETALL)},
++	{643,	0xfffffff0,	0xf,		(OFFSET_SEL | REGCLRSETALL)},
++	{899,	0xfffffff0,	0xf,		(OFFSET_SEL | REGCLRSETALL)},
++	{29,	0xc0ffffff,	0x10000000,	(OFFSET_SEL | REGCLRSETALL)},
++	{285,	0xc0ffffff,	0x10000000,	(OFFSET_SEL | REGCLRSETALL)},
++	{541,	0xc0ffffff,	0x10000000,	(OFFSET_SEL | REGCLRSETALL)},
++	{797,	0xc0ffffff,	0x10000000,	(OFFSET_SEL | REGCLRSETALL)},
++	{30,	0xffffffff,	0x00080000,	(OFFSET_SEL | REGCLRSETALL)},
++	{286,	0xffffffff,	0x00080000,	(OFFSET_SEL | REGCLRSETALL)},
++	{542,	0xffffffff,	0x00080000,	(OFFSET_SEL | REGCLRSETALL)},
++	{798,	0xffffffff,	0x00080000,	(OFFSET_SEL | REGCLRSETALL)},
++	{31,	0xffffffc0,	0x00000010,	(OFFSET_SEL | REGCLRSETALL)},
++	{287,	0xffffffc0,	0x00000010,	(OFFSET_SEL | REGCLRSETALL)},
++	{543,	0xffffffc0,	0x00000010,	(OFFSET_SEL | REGCLRSETALL)},
++	{799,	0xffffffc0,	0x00000010,	(OFFSET_SEL | REGCLRSETALL)},
++	{1071,	0xfffffff0,	0x00000008,	(OFFSET_SEL | REGCLRSETALL)},
++	{1327,	0xfffffff0,	0x00000008,	(OFFSET_SEL | REGCLRSETALL)},
++	{1583,	0xfffffff0,	0x00000008,	(OFFSET_SEL | REGCLRSETALL)},
++	{1808,	0xfffffff0,	0x00000008,	(OFFSET_SEL | REGCLRSETALL)},
++	{1896,	0xfff0ffff,	0x00080000,	(OFFSET_SEL | REGCLRSETALL)},
++};
++
++void ddr_reg_set(u32 *reg, const struct ddr_reg_cfg *data,
++		 u32 len, u32 mask)
++{
++	u32 *addr;
++	u32 i;
++
++	for (i = 0; i < len; i++) {
++		if (!(data[i].flag & mask))
++			continue;
++
++		if (data[i].flag & OFFSET_SEL)
++			addr = reg + PHY_AC_BASE_ADDR + data[i].offset;
++		else
++			addr = reg + PHY_BASE_ADDR + data[i].offset;
++
++		if (data[i].flag & F_CLRSET)
++			DDR_REG_TRIGGER(addr, data[i].mask, data[i].val);
++		else if (data[i].flag & F_SET)
++			out_le32(addr, data[i].val);
++		else
++			out_le32(addr, in_le32(addr) + data[i].val);
++	}
++}
++
++void ddr_phy_start(u32 *phyreg, enum ddr_size_t size)
++{
++	u32 len;
++	u32 mask;
++
++	switch (size) {
++	case DDR_SIZE_2G:
++		mask = REG2G;
++		break;
++
++	case DDR_SIZE_4G:
++		mask = REG4G;
++		break;
++
++	case DDR_SIZE_8G:
++		mask = REG8G;
++		break;
++
++	case DDR_SIZE_16G:
++	default:
++		return;
++	};
++
++	len = ARRAY_SIZE(ddr_start_cfg);
++	ddr_reg_set(phyreg, ddr_start_cfg, len, mask);
++	out_le32(phyreg, 0x01);
++}
+--- /dev/null
++++ b/drivers/ram/starfive/ddrphy_train.c
+@@ -0,0 +1,383 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ * Author: Yanhong Wang<yanhong.wang@starfivetech.com>
++ */
++
++#include <common.h>
++#include <asm/io.h>
++
++static const u32 ddr_train_data[] = {
++	0xb00,
++	0x101,
++	0x640000,
++	0x1,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x1,
++	0x7,
++	0x10002,
++	0x300080f,
++	0x1,
++	0x5,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x1010000,
++	0x280a0000,
++	0x0,
++	0x1,
++	0x3200000f,
++	0x0,
++	0x0,
++	0x10102,
++	0x1,
++	0x0,
++	0x0,
++	0x0,
++	0xaa,
++	0x55,
++	0xb5,
++	0x4a,
++	0x56,
++	0xa9,
++	0xa9,
++	0xb5,
++	0x1000000,
++	0x1000000,
++	0x0,
++	0xf0f0000,
++	0x14,
++	0x7d0,
++	0x300,
++	0x0,
++	0x0,
++	0x1000000,
++	0x10101,
++	0x0,
++	0x30000,
++	0x100,
++	0x170f,
++	0x0,
++	0x0,
++	0x0,
++	0xa140a01,
++	0x204010a,
++	0x2080510,
++	0x40400,
++	0x1000101,
++	0x10100,
++	0x2040f00,
++	0x34000000,
++	0x0,
++	0x0,
++	0x1000000,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x10100,
++	0x80101,
++	0x2000200,
++	0x1000100,
++	0x1000000,
++	0x2000200,
++	0x200,
++	0x0,
++	0x0,
++	0x0,
++	0xe000004,
++	0xc0d100f,
++	0xa09080b,
++	0x2010000,
++	0x80103,
++	0x200,
++	0x0,
++	0xf000000,
++	0x4,
++	0xa,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x30100,
++	0x1010001,
++	0x10200,
++	0x4000103,
++	0x1050001,
++	0x10600,
++	0x107,
++	0x0,
++	0x0,
++	0x10001,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x10000,
++	0x4,
++	0x0,
++	0x10000,
++	0x0,
++	0x3c0003,
++	0x80100a0,
++	0x16,
++	0x2c,
++	0x33,
++	0x20043,
++	0x2000200,
++	0x4,
++	0x60c,
++	0xa1400,
++	0x280000,
++	0x6,
++	0x46,
++	0x70,
++	0x610,
++	0x12b,
++	0x4001035,
++	0x1010404,
++	0x1e01,
++	0x1e001e,
++	0x1000100,
++	0x100,
++	0x0,
++	0x5060403,
++	0x1011108,
++	0x1010101,
++	0xf0a0a,
++	0x0,
++	0x0,
++	0x4000000,
++	0x4021008,
++	0x4020206,
++	0xc0034,
++	0x100038,
++	0x17003f,
++	0x10001,
++	0x10001,
++	0x10005,
++	0x20064,
++	0x100010b,
++	0x60006,
++	0x650100,
++	0x1000065,
++	0x10c010c,
++	0x1e1a1e1a,
++	0x1011e1a,
++	0xa070601,
++	0xa07060d,
++	0x100b080d,
++	0xc00f,
++	0xc01000,
++	0xc01000,
++	0x21000,
++	0x120005,
++	0x190064,
++	0x10b,
++	0x1100,
++	0x1e1a0056,
++	0x6000101,
++	0x130204,
++	0x1e1a0058,
++	0x1000101,
++	0x230408,
++	0x1e1a005e,
++	0x9000101,
++	0x610,
++	0x4040800,
++	0x40100,
++	0x3000277,
++	0xa032001,
++	0xa0a,
++	0x80908,
++	0x901,
++	0x1100315c,
++	0xa062002,
++	0xa0a,
++	0x141708,
++	0x150d,
++	0x2d00838e,
++	0xf102004,
++	0xf0b,
++	0x8c,
++	0x578,
++	0xc20,
++	0x7940,
++	0x206a,
++	0x14424,
++	0x730006,
++	0x3030133,
++	0x4,
++	0x0,
++	0x4,
++	0x1,
++	0x5,
++	0x2,
++	0x6,
++	0x50,
++	0x1,
++	0x5,
++	0x28,
++	0x73,
++	0xd6,
++	0x1,
++	0x5,
++	0x6b,
++	0x1000133,
++	0x140040,
++	0x10001,
++	0x1900040,
++	0x1000c,
++	0x42b0040,
++	0x320,
++	0x360014,
++	0x1010101,
++	0x2020101,
++	0x8080404,
++	0x67676767,
++	0x67676767,
++	0x67676767,
++	0x67676767,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x5500,
++	0x5a00,
++	0x55003c,
++	0x0,
++	0x3c00005a,
++	0x5500,
++	0x5a00,
++	0x55003c,
++	0x0,
++	0x3c00005a,
++	0x18171615,
++	0x14131211,
++	0x7060504,
++	0x3020100,
++	0x0,
++	0x0,
++	0x0,
++	0x1000000,
++	0x4020201,
++	0x80804,
++	0x0,
++	0x4,
++	0x0,
++	0x31,
++	0x31,
++	0x0,
++	0x0,
++	0x4d4d,
++	0x0,
++	0x14,
++	0x9,
++	0x31,
++	0x31,
++	0x0,
++	0x0,
++	0x4d4d,
++	0x0,
++	0x34,
++	0x1b,
++	0x31,
++	0x31,
++	0x0,
++	0x0,
++	0x4d4d,
++	0x0,
++	0x4,
++	0x0,
++	0x31,
++	0x31,
++	0x0,
++	0x0,
++	0x4d4d,
++	0x0,
++	0x14,
++	0x9,
++	0x31,
++	0x31,
++	0x0,
++	0x0,
++	0x4d4d,
++	0x0,
++	0x34,
++	0x1b,
++	0x31,
++	0x31,
++	0x0,
++	0x0,
++	0x4d4d,
++	0x0,
++	0x4,
++	0x0,
++	0x31,
++	0x31,
++	0x0,
++	0x0,
++	0x4d4d,
++	0x0,
++	0x14,
++	0x9,
++	0x31,
++	0x31,
++	0x0,
++	0x0,
++	0x4d4d,
++	0x0,
++	0x34,
++	0x1b,
++	0x31,
++	0x31,
++	0x0,
++	0x0,
++	0x4d4d,
++	0x0,
++	0x4,
++	0x0,
++	0x31,
++	0x31,
++	0x0,
++	0x0,
++	0x4d4d,
++	0x0,
++	0x14,
++	0x9,
++	0x31,
++	0x31,
++	0x0,
++	0x0,
++	0x4d4d,
++	0x0,
++	0x34,
++	0x1b,
++	0x31,
++	0x31,
++	0x0,
++	0x0,
++	0x4d4d,
++};
++
++void ddr_phy_train(u32 *phyreg)
++{
++	u32 i, len;
++
++	len = ARRAY_SIZE(ddr_train_data);
++	for (i = 0; i < len; i++)
++		out_le32(phyreg + i, ddr_train_data[i]);
++}
+--- /dev/null
++++ b/drivers/ram/starfive/ddrphy_utils.c
+@@ -0,0 +1,1955 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ * Author: Yanhong Wang<yanhong.wang@starfivetech.com>
++ */
++
++#include <common.h>
++#include <asm/io.h>
++
++static const  u32 ddr_phy_data[] = {
++	0x4f0,
++	0x0,
++	0x1030200,
++	0x0,
++	0x0,
++	0x3000000,
++	0x1000001,
++	0x3000400,
++	0x1000001,
++	0x0,
++	0x0,
++	0x1000001,
++	0x0,
++	0xc00004,
++	0xcc0008,
++	0x660601,
++	0x3,
++	0x0,
++	0x1,
++	0xaaaa,
++	0x5555,
++	0xb5b5,
++	0x4a4a,
++	0x5656,
++	0xa9a9,
++	0xa9a9,
++	0xb5b5,
++	0x0,
++	0x0,
++	0x8000000,
++	0x4000008,
++	0x408,
++	0xe4e400,
++	0x71020,
++	0xc0020,
++	0x620,
++	0x100,
++	0x55555555,
++	0xaaaaaaaa,
++	0x55555555,
++	0xaaaaaaaa,
++	0x5555,
++	0x1000100,
++	0x800180,
++	0x1,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x4,
++	0x20,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x7ff0000,
++	0x20008008,
++	0x810,
++	0x40100,
++	0x0,
++	0x1880c01,
++	0x2003880c,
++	0x20000125,
++	0x7ff0200,
++	0x101,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x20000,
++	0x51515052,
++	0x31c06000,
++	0x11f0004,
++	0xc0c001,
++	0x3000000,
++	0x30202,
++	0x42100010,
++	0x10c053e,
++	0xf0c20,
++	0x1000140,
++	0xa30120,
++	0xc00,
++	0x210,
++	0x200,
++	0x2800000,
++	0x80800101,
++	0x3,
++	0x76543210,
++	0x8,
++	0x2800280,
++	0x2800280,
++	0x2800280,
++	0x2800280,
++	0x280,
++	0x8000,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x6e0080,
++	0x1a00003,
++	0x0,
++	0x30000,
++	0x80200,
++	0x0,
++	0x20202020,
++	0x20202020,
++	0x2020,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x4f0,
++	0x0,
++	0x1030200,
++	0x0,
++	0x0,
++	0x3000000,
++	0x1000001,
++	0x3000400,
++	0x1000001,
++	0x0,
++	0x0,
++	0x1000001,
++	0x0,
++	0xc00004,
++	0xcc0008,
++	0x660601,
++	0x3,
++	0x0,
++	0x1,
++	0xaaaa,
++	0x5555,
++	0xb5b5,
++	0x4a4a,
++	0x5656,
++	0xa9a9,
++	0xa9a9,
++	0xb5b5,
++	0x0,
++	0x0,
++	0x8000000,
++	0x4000008,
++	0x408,
++	0xe4e400,
++	0x71020,
++	0xc0020,
++	0x620,
++	0x100,
++	0x55555555,
++	0xaaaaaaaa,
++	0x55555555,
++	0xaaaaaaaa,
++	0x5555,
++	0x1000100,
++	0x800180,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x4,
++	0x20,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x7ff0000,
++	0x20008008,
++	0x810,
++	0x40100,
++	0x0,
++	0x1880c01,
++	0x2003880c,
++	0x20000125,
++	0x7ff0200,
++	0x101,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x20000,
++	0x51515052,
++	0x31c06000,
++	0x11f0004,
++	0xc0c001,
++	0x3000000,
++	0x30202,
++	0x42100010,
++	0x10c053e,
++	0xf0c20,
++	0x1000140,
++	0xa30120,
++	0xc00,
++	0x210,
++	0x200,
++	0x2800000,
++	0x80800101,
++	0x3,
++	0x76543210,
++	0x8,
++	0x2800280,
++	0x2800280,
++	0x2800280,
++	0x2800280,
++	0x280,
++	0x8000,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x6e0080,
++	0x1a00003,
++	0x0,
++	0x30000,
++	0x80200,
++	0x0,
++	0x20202020,
++	0x20202020,
++	0x2020,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x4f0,
++	0x0,
++	0x1030200,
++	0x0,
++	0x0,
++	0x3000000,
++	0x1000001,
++	0x3000400,
++	0x1000001,
++	0x0,
++	0x0,
++	0x1000001,
++	0x0,
++	0xc00004,
++	0xcc0008,
++	0x660601,
++	0x3,
++	0x0,
++	0x1,
++	0xaaaa,
++	0x5555,
++	0xb5b5,
++	0x4a4a,
++	0x5656,
++	0xa9a9,
++	0xa9a9,
++	0xb5b5,
++	0x0,
++	0x0,
++	0x8000000,
++	0x4000008,
++	0x408,
++	0xe4e400,
++	0x71020,
++	0xc0020,
++	0x620,
++	0x100,
++	0x55555555,
++	0xaaaaaaaa,
++	0x55555555,
++	0xaaaaaaaa,
++	0x5555,
++	0x1000100,
++	0x800180,
++	0x1,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x4,
++	0x20,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x7ff0000,
++	0x20008008,
++	0x810,
++	0x40100,
++	0x0,
++	0x1880c01,
++	0x2003880c,
++	0x20000125,
++	0x7ff0200,
++	0x101,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x20000,
++	0x51515052,
++	0x31c06000,
++	0x11f0004,
++	0xc0c001,
++	0x3000000,
++	0x30202,
++	0x42100010,
++	0x10c053e,
++	0xf0c20,
++	0x1000140,
++	0xa30120,
++	0xc00,
++	0x210,
++	0x200,
++	0x2800000,
++	0x80800101,
++	0x3,
++	0x76543210,
++	0x8,
++	0x2800280,
++	0x2800280,
++	0x2800280,
++	0x2800280,
++	0x280,
++	0x8000,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x6e0080,
++	0x1a00003,
++	0x0,
++	0x30000,
++	0x80200,
++	0x0,
++	0x20202020,
++	0x20202020,
++	0x2020,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x4f0,
++	0x0,
++	0x1030200,
++	0x0,
++	0x0,
++	0x3000000,
++	0x1000001,
++	0x3000400,
++	0x1000001,
++	0x0,
++	0x0,
++	0x1000001,
++	0x0,
++	0xc00004,
++	0xcc0008,
++	0x660601,
++	0x3,
++	0x0,
++	0x1,
++	0xaaaa,
++	0x5555,
++	0xb5b5,
++	0x4a4a,
++	0x5656,
++	0xa9a9,
++	0xa9a9,
++	0xb5b5,
++	0x0,
++	0x0,
++	0x8000000,
++	0x4000008,
++	0x408,
++	0xe4e400,
++	0x71020,
++	0xc0020,
++	0x620,
++	0x100,
++	0x55555555,
++	0xaaaaaaaa,
++	0x55555555,
++	0xaaaaaaaa,
++	0x5555,
++	0x1000100,
++	0x800180,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x4,
++	0x20,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x7ff0000,
++	0x20008008,
++	0x810,
++	0x40100,
++	0x0,
++	0x1880c01,
++	0x2003880c,
++	0x20000125,
++	0x7ff0200,
++	0x101,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x20000,
++	0x51515052,
++	0x31c06000,
++	0x11f0004,
++	0xc0c001,
++	0x3000000,
++	0x30202,
++	0x42100010,
++	0x10c053e,
++	0xf0c20,
++	0x1000140,
++	0xa30120,
++	0xc00,
++	0x210,
++	0x200,
++	0x2800000,
++	0x80800101,
++	0x3,
++	0x76543210,
++	0x8,
++	0x2800280,
++	0x2800280,
++	0x2800280,
++	0x2800280,
++	0x280,
++	0x8000,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x800080,
++	0x6e0080,
++	0x1a00003,
++	0x0,
++	0x30000,
++	0x80200,
++	0x0,
++	0x20202020,
++	0x20202020,
++	0x2020,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x100,
++	0x200,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x400000,
++	0x80,
++	0xdcba98,
++	0x3000000,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x2a,
++	0x15,
++	0x15,
++	0x2a,
++	0x33,
++	0xc,
++	0xc,
++	0x33,
++	0xa418820,
++	0x3f0000,
++	0x13f,
++	0x20202000,
++	0x202020,
++	0x20008008,
++	0x810,
++	0x0,
++	0x255,
++	0x30000,
++	0x300,
++	0x300,
++	0x300,
++	0x300,
++	0x300,
++	0x42080010,
++	0x33e,
++	0x1010002,
++	0x80,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x100,
++	0x200,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x400000,
++	0x80,
++	0xdcba98,
++	0x3000000,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x2a,
++	0x15,
++	0x15,
++	0x2a,
++	0x33,
++	0xc,
++	0xc,
++	0x33,
++	0x0,
++	0x0,
++	0x0,
++	0x20202000,
++	0x202020,
++	0x20008008,
++	0x810,
++	0x0,
++	0x255,
++	0x30000,
++	0x300,
++	0x300,
++	0x300,
++	0x300,
++	0x300,
++	0x42080010,
++	0x33e,
++	0x1010002,
++	0x80,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x100,
++	0x200,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x400000,
++	0x80,
++	0xdcba98,
++	0x3000000,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x2a,
++	0x15,
++	0x15,
++	0x2a,
++	0x33,
++	0xc,
++	0xc,
++	0x33,
++	0x0,
++	0x10000000,
++	0x0,
++	0x20202000,
++	0x202020,
++	0x20008008,
++	0x810,
++	0x0,
++	0x255,
++	0x30000,
++	0x300,
++	0x300,
++	0x300,
++	0x300,
++	0x300,
++	0x42080010,
++	0x33e,
++	0x1010002,
++	0x80,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x100,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x50000,
++	0x4000000,
++	0x55,
++	0x0,
++	0x0,
++	0x0,
++	0xf0001,
++	0x280040,
++	0x5002,
++	0x10101,
++	0x8008,
++	0x81020,
++	0x0,
++	0x0,
++	0x1000000,
++	0x1,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x64,
++	0x0,
++	0x0,
++	0x1010000,
++	0x2020101,
++	0x4040202,
++	0x8080404,
++	0xf0f0808,
++	0xf0f0f0f,
++	0x20200f0f,
++	0x1b428000,
++	0x4,
++	0x1010000,
++	0x1070501,
++	0x54,
++	0x4410,
++	0x4410,
++	0x4410,
++	0x4410,
++	0x4410,
++	0x4410,
++	0x4410,
++	0x4410,
++	0x4410,
++	0x4410,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x64,
++	0x0,
++	0x108,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x3000000,
++	0x0,
++	0x0,
++	0x0,
++	0x4102035,
++	0x41020,
++	0x1c98c98,
++	0x3f400000,
++	0x3f3f1f3f,
++	0x1f3f3f1f,
++	0x1f3f3f,
++	0x0,
++	0x0,
++	0x1,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x76543210,
++	0x6010198,
++	0x0,
++	0x0,
++	0x0,
++	0x40700,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x2,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x0,
++	0x1142,
++	0x3020100,
++	0x3000300,
++	0x3000300,
++	0x3000300,
++	0x3000300,
++	0x3000300,
++	0x3000300,
++	0x3000300,
++	0x3000300,
++	0x3000300,
++	0x3000300,
++	0x300,
++	0x300,
++	0x300,
++	0x300,
++	0x2,
++	0x4011,
++	0x4011,
++	0x40,
++	0x40,
++	0x4011,
++	0x1fff00,
++	0x4011,
++	0x4011,
++	0x4011,
++	0x4011,
++	0x4011,
++	0x4011,
++	0x4011,
++	0x4011,
++	0x4011,
++	0x4011,
++	0x4011,
++	0x1004011,
++	0x200400,
++
++};
++
++void ddr_phy_util(u32 *phyreg)
++{
++	u32 i, len;
++
++	len = ARRAY_SIZE(ddr_phy_data);
++	for (i = 1792; i < len; i++)
++		out_le32(phyreg + i, ddr_phy_data[i]);
++
++	for (i = 0; i < 1792; i++)
++		out_le32(phyreg + i, ddr_phy_data[i]);
++}
+--- /dev/null
++++ b/drivers/ram/starfive/starfive_ddr.c
+@@ -0,0 +1,161 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ * Author: Yanhong Wang<yanhong.wang@starfivetech.com>
++ */
++
++#include <common.h>
++#include <asm/arch/regs.h>
++#include <asm/io.h>
++#include <clk.h>
++#include <dm.h>
++#include <fdtdec.h>
++#include <init.h>
++#include <linux/bitops.h>
++#include <linux/sizes.h>
++#include <linux/delay.h>
++#include <ram.h>
++#include <reset.h>
++
++#include "starfive_ddr.h"
++
++DECLARE_GLOBAL_DATA_PTR;
++
++struct starfive_ddr_priv {
++	struct udevice	*dev;
++	struct ram_info info;
++	void __iomem	*ctrlreg;
++	void __iomem	*phyreg;
++	struct reset_ctl_bulk rst;
++	struct clk	clk;
++	u32	fre;
++};
++
++static int starfive_ddr_setup(struct udevice *dev, struct starfive_ddr_priv *priv)
++{
++	enum ddr_size_t size;
++
++	switch (priv->info.size) {
++	case SZ_2G:
++		size = DDR_SIZE_2G;
++		break;
++
++	case SZ_4G:
++		size = DDR_SIZE_4G;
++		break;
++
++	case 0x200000000:
++		size = DDR_SIZE_8G;
++		break;
++
++	case 0x400000000:
++	default:
++		pr_err("unsupport size %lx\n", priv->info.size);
++		return -EINVAL;
++	}
++
++	ddr_phy_train(priv->phyreg + (PHY_BASE_ADDR << 2));
++	ddr_phy_util(priv->phyreg + (PHY_AC_BASE_ADDR << 2));
++	ddr_phy_start(priv->phyreg, size);
++
++	DDR_REG_SET(BUS, DDR_BUS_OSC_DIV2);
++	ddrcsr_boot(priv->ctrlreg, priv->ctrlreg + SEC_CTRL_ADDR,
++		    priv->phyreg, size);
++
++	return 0;
++}
++
++static int starfive_ddr_probe(struct udevice *dev)
++{
++	struct starfive_ddr_priv *priv = dev_get_priv(dev);
++	fdt_addr_t addr;
++	u64 rate;
++	int ret;
++
++	/* Read memory base and size from DT */
++	fdtdec_setup_mem_size_base();
++	priv->info.base = gd->ram_base;
++	priv->info.size = gd->ram_size;
++
++	priv->dev = dev;
++	addr = dev_read_addr_index(dev, 0);
++	if (addr == FDT_ADDR_T_NONE)
++		return -EINVAL;
++
++	priv->ctrlreg = (void __iomem *)addr;
++	addr = dev_read_addr_index(dev, 1);
++	if (addr == FDT_ADDR_T_NONE)
++		return -EINVAL;
++
++	priv->phyreg = (void __iomem *)addr;
++	ret = dev_read_u32(dev, "clock-frequency", &priv->fre);
++	if (ret)
++		return ret;
++
++	switch (priv->fre) {
++	case 2133:
++		rate = 1066000000;
++		break;
++
++	case 2800:
++		rate = 1400000000;
++		break;
++
++	default:
++		pr_err("Unknown DDR frequency %d\n", priv->fre);
++		return  -EINVAL;
++	};
++
++	ret = reset_get_bulk(dev, &priv->rst);
++	if (ret)
++		return ret;
++
++	ret = reset_deassert_bulk(&priv->rst);
++	if (ret < 0)
++		return ret;
++
++	ret = clk_get_by_index(dev, 0, &priv->clk);
++	if (ret)
++		goto err_free_reset;
++
++	ret = clk_set_rate(&priv->clk, rate);
++	if (ret < 0)
++		goto err_free_reset;
++
++	ret = starfive_ddr_setup(dev, priv);
++	printf("DDR version: dc2e84f0.\n");
++
++	return ret;
++
++err_free_reset:
++	reset_release_bulk(&priv->rst);
++
++	return ret;
++}
++
++static int starfive_ddr_get_info(struct udevice *dev, struct ram_info *info)
++{
++	struct starfive_ddr_priv *priv = dev_get_priv(dev);
++
++	*info = priv->info;
++
++	return 0;
++}
++
++static struct ram_ops starfive_ddr_ops = {
++	.get_info = starfive_ddr_get_info,
++};
++
++static const struct udevice_id starfive_ddr_ids[] = {
++	{ .compatible = "starfive,jh7110-dmc" },
++	{ }
++};
++
++U_BOOT_DRIVER(starfive_ddr) = {
++	.name = "starfive_ddr",
++	.id = UCLASS_RAM,
++	.of_match = starfive_ddr_ids,
++	.ops = &starfive_ddr_ops,
++	.probe = starfive_ddr_probe,
++	.priv_auto = sizeof(struct starfive_ddr_priv),
++};
+--- /dev/null
++++ b/drivers/ram/starfive/starfive_ddr.h
+@@ -0,0 +1,65 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ * Author: Yanhong Wang<yanhong.wang@starfivetech.com>
++ */
++
++#ifndef __STARFIVE_DDR_H__
++#define __STARFIVE_DDR_H__
++
++#define SEC_CTRL_ADDR		0x1000
++#define PHY_BASE_ADDR		0x800
++#define PHY_AC_BASE_ADDR	0x1000
++
++#define DDR_BUS_MASK		GENMASK(29, 24)
++#define DDR_AXI_MASK		BIT(31)
++#define DDR_BUS_OFFSET		0xAC
++#define DDR_AXI_OFFSET		0xB0
++
++#define DDR_BUS_OSC_DIV2	0
++#define DDR_BUS_PLL1_DIV2	1
++#define DDR_BUS_PLL1_DIV4	2
++#define DDR_BUS_PLL1_DIV8	3
++#define DDR_AXI_DISABLE		0
++#define DDR_AXI_ENABLE		1
++
++#define OFFSET_SEL		BIT(31)
++#define REG2G			BIT(30)
++#define REG4G			BIT(29)
++#define REG8G			BIT(28)
++#define F_ADDSET		BIT(2)
++#define F_SET			BIT(1)
++#define F_CLRSET		BIT(0)
++#define REGALL			(REG2G | REG4G | REG8G)
++#define REGSETALL		(F_SET | REGALL)
++#define REGCLRSETALL		(F_CLRSET | REGALL)
++#define REGADDSETALL		(F_ADDSET | REGALL)
++
++struct ddr_reg_cfg {
++	u32 offset;
++	u32 mask;
++	u32 val;
++	u32 flag;
++};
++
++enum ddr_size_t {
++	DDR_SIZE_2G,
++	DDR_SIZE_4G,
++	DDR_SIZE_8G,
++	DDR_SIZE_16G,
++};
++
++void ddr_phy_train(u32 *phyreg);
++void ddr_phy_util(u32 *phyreg);
++void ddr_phy_start(u32 *phyreg, enum ddr_size_t size);
++void ddrcsr_boot(u32 *csrreg, u32 *secreg, u32 *phyreg, enum ddr_size_t size);
++
++#define DDR_REG_TRIGGER(addr, mask, value) \
++	out_le32((addr), (in_le32(addr) & (mask)) | (value))
++
++#define DDR_REG_SET(type, val) \
++	clrsetbits_le32(JH7110_SYS_CRG + DDR_##type##_OFFSET, \
++		DDR_##type##_MASK, \
++		((val) << __ffs(DDR_##type##_MASK)) & DDR_##type##_MASK)
++
++#endif /*__STARFIVE_DDR_H__*/
+--- /dev/null
++++ b/drivers/reset/reset-jh7110.c
+@@ -0,0 +1,158 @@
++// SPDX-License-Identifier: GPL-2.0+
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ * Author:	Yanhong Wang <yanhong.wang@starfivetech.com>
++ *
++ */
++
++#include <common.h>
++#include <dm.h>
++#include <dm/ofnode.h>
++#include <dt-bindings/reset/starfive-jh7110.h>
++#include <errno.h>
++#include <linux/iopoll.h>
++#include <reset-uclass.h>
++
++struct jh7110_reset_priv {
++	void __iomem *reg;
++	u32	assert;
++	u32	status;
++	u32	resets;
++};
++
++struct reset_info {
++	const char *compat;
++	const u32 nr_resets;
++	const u32 assert_offset;
++	const u32 status_offset;
++};
++
++static const struct reset_info jh7110_rst_info[] = {
++	{
++		.compat = "starfive,jh7110-syscrg",
++		.nr_resets = JH7110_SYSRST_END,
++		.assert_offset = 0x2F8,
++		.status_offset = 0x308,
++	},
++	{
++		.compat = "starfive,jh7110-aoncrg",
++		.nr_resets = JH7110_AONRST_END,
++		.assert_offset = 0x38,
++		.status_offset = 0x3C,
++	},
++	{
++		.compat = "starfive,jh7110-stgcrg",
++		.nr_resets = JH7110_STGRST_END,
++		.assert_offset = 0x74,
++		.status_offset = 0x78,
++	}
++};
++
++static const struct reset_info *jh7110_reset_get_cfg(const char *compat)
++{
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(jh7110_rst_info); i++)
++		if (!strcmp(compat, jh7110_rst_info[i].compat))
++			return &jh7110_rst_info[i];
++
++	return NULL;
++}
++
++static int jh7110_reset_trigger(struct jh7110_reset_priv *priv,
++				unsigned long id, bool assert)
++{
++	ulong group;
++	u32 mask, value, done = 0;
++	ulong addr;
++
++	group = id / 32;
++	mask = BIT(id % 32);
++
++	if (!assert)
++		done ^= mask;
++
++	addr = (ulong)priv->reg + priv->assert + group * sizeof(u32);
++	value = readl((ulong *)addr);
++
++	if (assert)
++		value |= mask;
++	else
++		value &= ~mask;
++
++	writel(value, (ulong *)addr);
++	addr = (ulong)priv->reg + priv->status + group * sizeof(u32);
++
++	return readl_poll_timeout((ulong *)addr, value,
++						(value & mask) == done, 1000);
++}
++
++static int jh7110_reset_assert(struct reset_ctl *rst)
++{
++	struct jh7110_reset_priv *priv = dev_get_priv(rst->dev);
++
++	jh7110_reset_trigger(priv, rst->id, true);
++
++	return 0;
++}
++
++static int jh7110_reset_deassert(struct reset_ctl *rst)
++{
++	struct jh7110_reset_priv *priv = dev_get_priv(rst->dev);
++
++	jh7110_reset_trigger(priv, rst->id, false);
++
++	return 0;
++}
++
++static int jh7110_reset_free(struct reset_ctl *rst)
++{
++	return 0;
++}
++
++static int jh7110_reset_request(struct reset_ctl *rst)
++{
++	struct jh7110_reset_priv *priv = dev_get_priv(rst->dev);
++
++	if (rst->id >= priv->resets)
++		return -EINVAL;
++
++	return 0;
++}
++
++static int jh7110_reset_probe(struct udevice *dev)
++{
++	struct jh7110_reset_priv *priv = dev_get_priv(dev);
++	const struct reset_info *cfg;
++	const char *compat;
++
++	compat = ofnode_get_property(dev_ofnode(dev), "compatible", NULL);
++	if (!compat)
++		return -EINVAL;
++
++	cfg = jh7110_reset_get_cfg(compat);
++	if (!cfg)
++		return -EINVAL;
++
++	priv->assert = cfg->assert_offset;
++	priv->status = cfg->status_offset;
++	priv->resets = cfg->nr_resets;
++	priv->reg = (void __iomem *)dev_read_addr_index(dev, 0);
++
++	return 0;
++}
++
++const struct reset_ops jh7110_reset_reset_ops = {
++	.rfree = jh7110_reset_free,
++	.request = jh7110_reset_request,
++	.rst_assert = jh7110_reset_assert,
++	.rst_deassert = jh7110_reset_deassert,
++};
++
++U_BOOT_DRIVER(jh7110_reset) = {
++	.name = "jh7110_reset",
++	.id = UCLASS_RESET,
++	.ops = &jh7110_reset_reset_ops,
++	.probe = jh7110_reset_probe,
++	.priv_auto = sizeof(struct jh7110_reset_priv),
++};
+--- /dev/null
++++ b/include/configs/starfive-visionfive2.h
+@@ -0,0 +1,18 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ * Author:	Yanhong Wang<yanhong.wang@starfivetech.com>
++ *
++ */
++
++#ifndef _STARFIVE_VISIONFIVE2_H
++#define _STARFIVE_VISIONFIVE2_H
++
++#define RISCV_MMODE_TIMERBASE		0x2000000
++#define RISCV_MMODE_TIMER_FREQ		4000000
++
++#define RISCV_SMODE_TIMER_FREQ		4000000
++
++#define __io
++
++#endif /* _STARFIVE_VISIONFIVE2_H */
+--- /dev/null
++++ b/include/dt-bindings/clock/starfive-jh7110.h
+@@ -0,0 +1,271 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ *
++ * Author: Yanhong Wang <yanhong.wang@starfivetech.com>
++ */
++
++#ifndef __DT_BINDINGS_CLOCK_STARFIVE_JH7110_CLOCK_H__
++#define __DT_BINDINGS_CLOCK_STARFIVE_JH7110_CLOCK_H__
++
++#define JH7110_SYSCLK_CPU_ROOT			0
++#define JH7110_SYSCLK_CPU_CORE			1
++#define JH7110_SYSCLK_CPU_BUS			2
++#define JH7110_SYSCLK_GPU_ROOT			3
++#define JH7110_SYSCLK_PERH_ROOT		4
++#define JH7110_SYSCLK_BUS_ROOT			5
++#define JH7110_SYSCLK_NOCSTG_BUS		6
++#define JH7110_SYSCLK_AXI_CFG0			7
++#define JH7110_SYSCLK_STG_AXIAHB		8
++#define JH7110_SYSCLK_AHB0			9
++#define JH7110_SYSCLK_AHB1			10
++#define JH7110_SYSCLK_APB_BUS_FUNC		11
++#define JH7110_SYSCLK_APB0			12
++#define JH7110_SYSCLK_PLL0_DIV2		13
++#define JH7110_SYSCLK_PLL1_DIV2		14
++#define JH7110_SYSCLK_PLL2_DIV2		15
++#define JH7110_SYSCLK_AUDIO_ROOT		16
++#define JH7110_SYSCLK_MCLK_INNER		17
++#define JH7110_SYSCLK_MCLK			18
++#define JH7110_SYSCLK_MCLK_OUT			19
++#define JH7110_SYSCLK_ISP_2X			20
++#define JH7110_SYSCLK_ISP_AXI			21
++#define JH7110_SYSCLK_GCLK0			22
++#define JH7110_SYSCLK_GCLK1			23
++#define JH7110_SYSCLK_GCLK2			24
++#define JH7110_SYSCLK_CORE			25
++#define JH7110_SYSCLK_CORE1			26
++#define JH7110_SYSCLK_CORE2			27
++#define JH7110_SYSCLK_CORE3			28
++#define JH7110_SYSCLK_CORE4			29
++#define JH7110_SYSCLK_DEBUG			30
++#define JH7110_SYSCLK_RTC_TOGGLE		31
++#define JH7110_SYSCLK_TRACE0			32
++#define JH7110_SYSCLK_TRACE1			33
++#define JH7110_SYSCLK_TRACE2			34
++#define JH7110_SYSCLK_TRACE3			35
++#define JH7110_SYSCLK_TRACE4			36
++#define JH7110_SYSCLK_TRACE_COM		37
++#define JH7110_SYSCLK_NOC_BUS_CPU_AXI		38
++#define JH7110_SYSCLK_NOC_BUS_AXICFG0_AXI	39
++#define JH7110_SYSCLK_OSC_DIV2			40
++#define JH7110_SYSCLK_PLL1_DIV4		41
++#define JH7110_SYSCLK_PLL1_DIV8		42
++#define JH7110_SYSCLK_DDR_BUS			43
++#define JH7110_SYSCLK_DDR_AXI			44
++#define JH7110_SYSCLK_GPU_CORE			45
++#define JH7110_SYSCLK_GPU_CORE_CLK		46
++#define JH7110_SYSCLK_GPU_SYS_CLK		47
++#define JH7110_SYSCLK_GPU_APB			48
++#define JH7110_SYSCLK_GPU_RTC_TOGGLE		49
++#define JH7110_SYSCLK_NOC_BUS_GPU_AXI		50
++#define JH7110_SYSCLK_ISP_TOP_CLK_ISPCORE_2X	51
++#define JH7110_SYSCLK_ISP_TOP_CLK_ISP_AXI	52
++#define JH7110_SYSCLK_NOC_BUS_ISP_AXI		53
++#define JH7110_SYSCLK_HIFI4_CORE		54
++#define JH7110_SYSCLK_HIFI4_AXI		55
++#define JH7110_SYSCLK_AXI_CFG1_DEC_MAIN	56
++#define JH7110_SYSCLK_AXI_CFG1_DEC_AHB		57
++#define JH7110_SYSCLK_VOUT_SRC			58
++#define JH7110_SYSCLK_VOUT_AXI			59
++#define JH7110_SYSCLK_NOC_BUS_DISP_AXI		60
++#define JH7110_SYSCLK_VOUT_TOP_CLK_VOUT_AHB		61
++#define JH7110_SYSCLK_VOUT_TOP_CLK_VOUT_AXI		62
++#define JH7110_SYSCLK_VOUT_TOP_CLK_HDMITX0_MCLK	63
++#define JH7110_SYSCLK_VOUT_TOP_CLK_MIPIPHY_REF		64
++#define JH7110_SYSCLK_JPEGC_AXI		65
++#define JH7110_SYSCLK_CODAJ12_AXI		66
++#define JH7110_SYSCLK_CODAJ12_CORE		67
++#define JH7110_SYSCLK_CODAJ12_APB		68
++#define JH7110_SYSCLK_VDEC_AXI			69
++#define JH7110_SYSCLK_WAVE511_AXI		70
++#define JH7110_SYSCLK_WAVE511_BPU		71
++#define JH7110_SYSCLK_WAVE511_VCE		72
++#define JH7110_SYSCLK_WAVE511_APB		73
++#define JH7110_SYSCLK_VDEC_JPG_ARB_JPG		74
++#define JH7110_SYSCLK_VDEC_JPG_ARB_MAIN	75
++#define JH7110_SYSCLK_NOC_BUS_VDEC_AXI		76
++#define JH7110_SYSCLK_VENC_AXI			77
++#define JH7110_SYSCLK_WAVE420L_AXI		78
++#define JH7110_SYSCLK_WAVE420L_BPU		79
++#define JH7110_SYSCLK_WAVE420L_VCE		80
++#define JH7110_SYSCLK_WAVE420L_APB		81
++#define JH7110_SYSCLK_NOC_BUS_VENC_AXI		82
++#define JH7110_SYSCLK_AXI_CFG0_DEC_MAIN_DIV	83
++#define JH7110_SYSCLK_AXI_CFG0_DEC_MAIN	84
++#define JH7110_SYSCLK_AXI_CFG0_DEC_HIFI4	85
++#define JH7110_SYSCLK_AXIMEM2_AXI		86
++#define JH7110_SYSCLK_QSPI_AHB			87
++#define JH7110_SYSCLK_QSPI_APB			88
++#define JH7110_SYSCLK_QSPI_REF_SRC		89
++#define JH7110_SYSCLK_QSPI_REF			90
++#define JH7110_SYSCLK_SDIO0_AHB		91
++#define JH7110_SYSCLK_SDIO1_AHB		92
++#define JH7110_SYSCLK_SDIO0_SDCARD		93
++#define JH7110_SYSCLK_SDIO1_SDCARD		94
++#define JH7110_SYSCLK_USB_125M			95
++#define JH7110_SYSCLK_NOC_BUS_STG_AXI		96
++#define JH7110_SYSCLK_GMAC1_AHB		97
++#define JH7110_SYSCLK_GMAC1_AXI		98
++#define JH7110_SYSCLK_GMAC_SRC			99
++#define JH7110_SYSCLK_GMAC1_GTXCLK		100
++#define JH7110_SYSCLK_GMAC1_RMII_RTX		101
++#define JH7110_SYSCLK_GMAC1_PTP		102
++#define JH7110_SYSCLK_GMAC1_RX			103
++#define JH7110_SYSCLK_GMAC1_RX_INV		104
++#define JH7110_SYSCLK_GMAC1_TX			105
++#define JH7110_SYSCLK_GMAC1_TX_INV		106
++#define JH7110_SYSCLK_GMAC1_GTXC		107
++#define JH7110_SYSCLK_GMAC0_GTXCLK		108
++#define JH7110_SYSCLK_GMAC0_PTP		109
++#define JH7110_SYSCLK_GMAC_PHY			110
++#define JH7110_SYSCLK_GMAC0_GTXC		111
++#define JH7110_SYSCLK_IOMUX			112
++#define JH7110_SYSCLK_MAILBOX			113
++#define JH7110_SYSCLK_INT_CTRL_APB		114
++#define JH7110_SYSCLK_CAN0_APB			115
++#define JH7110_SYSCLK_CAN0_TIMER		116
++#define JH7110_SYSCLK_CAN0_CAN			117
++#define JH7110_SYSCLK_CAN1_APB			118
++#define JH7110_SYSCLK_CAN1_TIMER		119
++#define JH7110_SYSCLK_CAN1_CAN			120
++#define JH7110_SYSCLK_PWM_APB			121
++#define JH7110_SYSCLK_WDT_APB			122
++#define JH7110_SYSCLK_WDT_CORE			123
++#define JH7110_SYSCLK_TIMER_APB		124
++#define JH7110_SYSCLK_TIMER0			125
++#define JH7110_SYSCLK_TIMER1			126
++#define JH7110_SYSCLK_TIMER2			127
++#define JH7110_SYSCLK_TIMER3			128
++#define JH7110_SYSCLK_TEMP_APB			129
++#define JH7110_SYSCLK_TEMP_CORE		130
++#define JH7110_SYSCLK_SPI0_APB			131
++#define JH7110_SYSCLK_SPI1_APB			132
++#define JH7110_SYSCLK_SPI2_APB			133
++#define JH7110_SYSCLK_SPI3_APB			134
++#define JH7110_SYSCLK_SPI4_APB			135
++#define JH7110_SYSCLK_SPI5_APB			136
++#define JH7110_SYSCLK_SPI6_APB			137
++#define JH7110_SYSCLK_I2C0_APB			138
++#define JH7110_SYSCLK_I2C1_APB			139
++#define JH7110_SYSCLK_I2C2_APB			140
++#define JH7110_SYSCLK_I2C3_APB			141
++#define JH7110_SYSCLK_I2C4_APB			142
++#define JH7110_SYSCLK_I2C5_APB			143
++#define JH7110_SYSCLK_I2C6_APB			144
++#define JH7110_SYSCLK_UART0_APB		145
++#define JH7110_SYSCLK_UART0_CORE		146
++#define JH7110_SYSCLK_UART1_APB		147
++#define JH7110_SYSCLK_UART1_CORE		148
++#define JH7110_SYSCLK_UART2_APB		149
++#define JH7110_SYSCLK_UART2_CORE		150
++#define JH7110_SYSCLK_UART3_APB		151
++#define JH7110_SYSCLK_UART3_CORE		152
++#define JH7110_SYSCLK_UART4_APB		153
++#define JH7110_SYSCLK_UART4_CORE		154
++#define JH7110_SYSCLK_UART5_APB		155
++#define JH7110_SYSCLK_UART5_CORE		156
++#define JH7110_SYSCLK_PWMDAC_APB		157
++#define JH7110_SYSCLK_PWMDAC_CORE		158
++#define JH7110_SYSCLK_SPDIF_APB		159
++#define JH7110_SYSCLK_SPDIF_CORE		160
++#define JH7110_SYSCLK_I2STX0_APB		161
++#define JH7110_SYSCLK_I2STX0_BCLK_MST		162
++#define JH7110_SYSCLK_I2STX0_BCLK_MST_INV	163
++#define JH7110_SYSCLK_I2STX0_LRCK_MST		164
++#define JH7110_SYSCLK_I2STX0_BCLK		165
++#define JH7110_SYSCLK_I2STX0_BCLK_INV		166
++#define JH7110_SYSCLK_I2STX0_LRCK		167
++#define JH7110_SYSCLK_I2STX1_APB		168
++#define JH7110_SYSCLK_I2STX1_BCLK_MST		169
++#define JH7110_SYSCLK_I2STX1_BCLK_MST_INV	170
++#define JH7110_SYSCLK_I2STX1_LRCK_MST		171
++#define JH7110_SYSCLK_I2STX1_BCLK		172
++#define JH7110_SYSCLK_I2STX1_BCLK_INV		173
++#define JH7110_SYSCLK_I2STX1_LRCK		174
++#define JH7110_SYSCLK_I2SRX_APB		175
++#define JH7110_SYSCLK_I2SRX_BCLK_MST		176
++#define JH7110_SYSCLK_I2SRX_BCLK_MST_INV	177
++#define JH7110_SYSCLK_I2SRX_LRCK_MST		178
++#define JH7110_SYSCLK_I2SRX_BCLK		179
++#define JH7110_SYSCLK_I2SRX_BCLK_INV		180
++#define JH7110_SYSCLK_I2SRX_LRCK		181
++#define JH7110_SYSCLK_PDM_DMIC			182
++#define JH7110_SYSCLK_PDM_APB			183
++#define JH7110_SYSCLK_TDM_AHB			184
++#define JH7110_SYSCLK_TDM_APB			185
++#define JH7110_SYSCLK_TDM_INTERNAL		186
++#define JH7110_SYSCLK_TDM_CLK_TDM		187
++#define JH7110_SYSCLK_TDM_CLK_TDM_N		188
++#define JH7110_SYSCLK_JTAG_CERTIFICATION_TRNG	189
++
++#define JH7110_SYSCLK_PLL0_OUT			190
++#define JH7110_SYSCLK_PLL1_OUT			191
++#define JH7110_SYSCLK_PLL2_OUT			192
++#define JH7110_SYSCLK_PCLK2_MUX_FUNC		193
++#define JH7110_SYSCLK_PCLK2_MUX		194
++#define JH7110_SYSCLK_APB_BUS			195
++#define JH7110_SYSCLK_AXI_CFG1			196
++#define JH7110_SYSCLK_APB12			197
++#define JH7110_SYSCLK_VOUT_ROOT		198
++#define JH7110_SYSCLK_VENC_ROOT		199
++#define JH7110_SYSCLK_VDEC_ROOT		200
++#define JH7110_SYSCLK_GMACUSB_ROOT		201
++#define JH7110_SYSCLK_AON_APB			202
++#define JH7110_SYSCLK_AON_AHB			203
++#define JH7110_SYSCLK_I2C5_CORE		204
++
++#define JH7110_SYSCLK_END			205
++
++#define JH7110_AONCLK_OSC_DIV4		(JH7110_SYSCLK_END + 0)
++#define JH7110_AONCLK_APB_FUNC		(JH7110_SYSCLK_END + 1)
++#define JH7110_AONCLK_GMAC0_AHB	(JH7110_SYSCLK_END + 2)
++#define JH7110_AONCLK_GMAC0_AXI	(JH7110_SYSCLK_END + 3)
++#define JH7110_AONCLK_GMAC0_RMII_RTX	(JH7110_SYSCLK_END + 4)
++#define JH7110_AONCLK_GMAC0_TX		(JH7110_SYSCLK_END + 5)
++#define JH7110_AONCLK_GMAC0_TX_INV	(JH7110_SYSCLK_END + 6)
++#define JH7110_AONCLK_GMAC0_RX		(JH7110_SYSCLK_END + 7)
++#define JH7110_AONCLK_GMAC0_RX_INV	(JH7110_SYSCLK_END + 8)
++#define JH7110_AONCLK_OTPC_APB		(JH7110_SYSCLK_END  + 9)
++#define JH7110_AONCLK_RTC_APB		(JH7110_SYSCLK_END + 10)
++#define JH7110_AONCLK_RTC_INTERNAL	(JH7110_SYSCLK_END + 11)
++#define JH7110_AONCLK_RTC_32K		(JH7110_SYSCLK_END + 12)
++#define JH7110_AONCLK_RTC_CAL		(JH7110_SYSCLK_END + 13)
++
++#define JH7110_AONCLK_END		(JH7110_SYSCLK_END + 14)
++
++#define JH7110_STGCLK_HIFI4_CORE	(JH7110_AONCLK_END + 0)
++#define JH7110_STGCLK_USB_APB		(JH7110_AONCLK_END + 1)
++#define JH7110_STGCLK_USB_UTMI_APB	(JH7110_AONCLK_END + 2)
++#define JH7110_STGCLK_USB_AXI		(JH7110_AONCLK_END + 3)
++#define JH7110_STGCLK_USB_LPM		(JH7110_AONCLK_END + 4)
++#define JH7110_STGCLK_USB_STB		(JH7110_AONCLK_END + 5)
++#define JH7110_STGCLK_USB_APP_125	(JH7110_AONCLK_END + 6)
++#define JH7110_STGCLK_USB_REFCLK	(JH7110_AONCLK_END + 7)
++#define JH7110_STGCLK_PCIE0_AXI	(JH7110_AONCLK_END + 8)
++#define JH7110_STGCLK_PCIE0_APB	(JH7110_AONCLK_END + 9)
++#define JH7110_STGCLK_PCIE0_TL		(JH7110_AONCLK_END + 10)
++#define JH7110_STGCLK_PCIE1_AXI	(JH7110_AONCLK_END + 11)
++#define JH7110_STGCLK_PCIE1_APB	(JH7110_AONCLK_END + 12)
++#define JH7110_STGCLK_PCIE1_TL		(JH7110_AONCLK_END + 13)
++#define JH7110_STGCLK_PCIE01_MAIN	(JH7110_AONCLK_END + 14)
++#define JH7110_STGCLK_SEC_HCLK		(JH7110_AONCLK_END + 15)
++#define JH7110_STGCLK_SEC_MISCAHB	(JH7110_AONCLK_END + 16)
++#define JH7110_STGCLK_MTRX_GRP0_MAIN	(JH7110_AONCLK_END + 17)
++#define JH7110_STGCLK_MTRX_GRP0_BUS	(JH7110_AONCLK_END + 18)
++#define JH7110_STGCLK_MTRX_GRP0_STG	(JH7110_AONCLK_END + 19)
++#define JH7110_STGCLK_MTRX_GRP1_MAIN	(JH7110_AONCLK_END + 20)
++#define JH7110_STGCLK_MTRX_GRP1_BUS	(JH7110_AONCLK_END + 21)
++#define JH7110_STGCLK_MTRX_GRP1_STG	(JH7110_AONCLK_END + 22)
++#define JH7110_STGCLK_MTRX_GRP1_HIFI	(JH7110_AONCLK_END + 23)
++#define JH7110_STGCLK_E2_RTC		(JH7110_AONCLK_END + 24)
++#define JH7110_STGCLK_E2_CORE		(JH7110_AONCLK_END + 25)
++#define JH7110_STGCLK_E2_DBG		(JH7110_AONCLK_END + 26)
++#define JH7110_STGCLK_DMA1P_AXI	(JH7110_AONCLK_END + 27)
++#define JH7110_STGCLK_DMA1P_AHB	(JH7110_AONCLK_END + 28)
++
++#define JH7110_STGCLK_STG_APB		(JH7110_AONCLK_END + 29)
++
++#define JH7110_STGCLK_END		(JH7110_AONCLK_END + 30)
++
++#endif /* __DT_BINDINGS_CLOCK_STARFIVE_JH7110_CLOCK_H__ */
+--- /dev/null
++++ b/include/dt-bindings/pinctrl/pinctrl-starfive-jh7110.h
+@@ -0,0 +1,427 @@
++/* SPDX-License-Identifier: GPL-2.0 OR MIT */
++/*
++ * Copyright (C) 2022 Emil Renner Berthing <kernel@esmil.dk>
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ */
++
++#ifndef __DT_BINDINGS_PINCTRL_STARFIVE_JH7110_H__
++#define __DT_BINDINGS_PINCTRL_STARFIVE_JH7110_H__
++
++/*
++ * mux bits:
++ *  | 31 - 24 | 23 - 16 | 15 - 10 |  9 - 8   |  7 - 0  |
++ *  |  din    |  dout   |  doen   | function | gpio nr |
++ *
++ * dout:     output signal
++ * doen:     output enable signal
++ * din:      optional input signal, 0xff = none
++ * function:
++ * gpio nr:  gpio number, 0 - 63
++ */
++#define GPIOMUX(n, dout, doen, din) ( \
++		(((din)  & 0xff) << 24) | \
++		(((dout) & 0xff) << 16) | \
++		(((doen) & 0x3f) << 10) | \
++		((n) & 0x3f))
++
++#define PINMUX(n, func) ((1 << 10) | (((func) & 0x3) << 8) | ((n) & 0xff))
++
++/* sys_iomux pin */
++#define	PAD_GPIO0	 0
++#define	PAD_GPIO1	 1
++#define	PAD_GPIO2	 2
++#define	PAD_GPIO3	 3
++#define	PAD_GPIO4	 4
++#define	PAD_GPIO5	 5
++#define	PAD_GPIO6	 6
++#define	PAD_GPIO7	 7
++#define	PAD_GPIO8	 8
++#define	PAD_GPIO9	 9
++#define	PAD_GPIO10	10
++#define	PAD_GPIO11	11
++#define	PAD_GPIO12	12
++#define	PAD_GPIO13	13
++#define	PAD_GPIO14	14
++#define	PAD_GPIO15	15
++#define	PAD_GPIO16	16
++#define	PAD_GPIO17	17
++#define	PAD_GPIO18	18
++#define	PAD_GPIO19	19
++#define	PAD_GPIO20	20
++#define	PAD_GPIO21	21
++#define	PAD_GPIO22	22
++#define	PAD_GPIO23	23
++#define	PAD_GPIO24	24
++#define	PAD_GPIO25	25
++#define	PAD_GPIO26	26
++#define	PAD_GPIO27	27
++#define	PAD_GPIO28	28
++#define	PAD_GPIO29	29
++#define	PAD_GPIO30	30
++#define	PAD_GPIO31	31
++#define	PAD_GPIO32	32
++#define	PAD_GPIO33	33
++#define	PAD_GPIO34	34
++#define	PAD_GPIO35	35
++#define	PAD_GPIO36	36
++#define	PAD_GPIO37	37
++#define	PAD_GPIO38	38
++#define	PAD_GPIO39	39
++#define	PAD_GPIO40	40
++#define	PAD_GPIO41	41
++#define	PAD_GPIO42	42
++#define	PAD_GPIO43	43
++#define	PAD_GPIO44	44
++#define	PAD_GPIO45	45
++#define	PAD_GPIO46	46
++#define	PAD_GPIO47	47
++#define	PAD_GPIO48	48
++#define	PAD_GPIO49	49
++#define	PAD_GPIO50	50
++#define	PAD_GPIO51	51
++#define	PAD_GPIO52	52
++#define	PAD_GPIO53	53
++#define	PAD_GPIO54	54
++#define	PAD_GPIO55	55
++#define	PAD_GPIO56	56
++#define	PAD_GPIO57	57
++#define	PAD_GPIO58	58
++#define	PAD_GPIO59	59
++#define	PAD_GPIO60	60
++#define	PAD_GPIO61	61
++#define	PAD_GPIO62	62
++#define	PAD_GPIO63	63
++#define	PAD_SD0_CLK	64
++#define	PAD_SD0_CMD	65
++#define	PAD_SD0_DATA0	66
++#define	PAD_SD0_DATA1	67
++#define	PAD_SD0_DATA2	68
++#define	PAD_SD0_DATA3	69
++#define	PAD_SD0_DATA4	70
++#define	PAD_SD0_DATA5	71
++#define	PAD_SD0_DATA6	72
++#define	PAD_SD0_DATA7	73
++#define	PAD_SD0_STRB	74
++#define	PAD_GMAC1_MDC	75
++#define	PAD_GMAC1_MDIO	76
++#define	PAD_GMAC1_RXD0	77
++#define	PAD_GMAC1_RXD1	78
++#define	PAD_GMAC1_RXD2	79
++#define	PAD_GMAC1_RXD3	80
++#define	PAD_GMAC1_RXDV	81
++#define	PAD_GMAC1_RXC	82
++#define	PAD_GMAC1_TXD0	83
++#define	PAD_GMAC1_TXD1	84
++#define	PAD_GMAC1_TXD2	85
++#define	PAD_GMAC1_TXD3	86
++#define	PAD_GMAC1_TXEN	87
++#define	PAD_GMAC1_TXC	88
++#define	PAD_QSPI_SCLK	89
++#define	PAD_QSPI_CS0	90
++#define	PAD_QSPI_DATA0	91
++#define	PAD_QSPI_DATA1	92
++#define	PAD_QSPI_DATA2	93
++#define	PAD_QSPI_DATA3	94
++
++/* aon_iomux pin */
++#define	PAD_TESTEN	0
++#define	PAD_RGPIO0	1
++#define	PAD_RGPIO1	2
++#define	PAD_RGPIO2	3
++#define	PAD_RGPIO3	4
++#define	PAD_RSTN	5
++#define	PAD_GMAC0_MDC	6
++#define	PAD_GMAC0_MDIO	7
++#define	PAD_GMAC0_RXD0	8
++#define	PAD_GMAC0_RXD1	9
++#define	PAD_GMAC0_RXD2	10
++#define	PAD_GMAC0_RXD3	11
++#define	PAD_GMAC0_RXDV	12
++#define	PAD_GMAC0_RXC	13
++#define	PAD_GMAC0_TXD0	14
++#define	PAD_GMAC0_TXD1	15
++#define	PAD_GMAC0_TXD2	16
++#define	PAD_GMAC0_TXD3	17
++#define	PAD_GMAC0_TXEN	18
++#define	PAD_GMAC0_TXC	19
++
++/* sys_iomux dout */
++#define GPOUT_LOW				  0
++#define GPOUT_HIGH				  1
++#define GPOUT_SYS_WAVE511_UART_TX		  2
++#define GPOUT_SYS_CAN0_STBY			  3
++#define GPOUT_SYS_CAN0_TST_NEXT_BIT		  4
++#define GPOUT_SYS_CAN0_TST_SAMPLE_POINT	  5
++#define GPOUT_SYS_CAN0_TXD			  6
++#define GPOUT_SYS_USB_DRIVE_VBUS		  7
++#define GPOUT_SYS_QSPI_CS1			  8
++#define GPOUT_SYS_SPDIF			 9
++#define GPOUT_SYS_HDMI_CEC_SDA			 10
++#define GPOUT_SYS_HDMI_DDC_SCL			 11
++#define GPOUT_SYS_HDMI_DDC_SDA			 12
++#define GPOUT_SYS_WATCHDOG			 13
++#define GPOUT_SYS_I2C0_CLK			 14
++#define GPOUT_SYS_I2C0_DATA			 15
++#define GPOUT_SYS_SDIO0_BACK_END_POWER		 16
++#define GPOUT_SYS_SDIO0_CARD_POWER_EN		 17
++#define GPOUT_SYS_SDIO0_CCMD_OD_PULLUP_EN	 18
++#define GPOUT_SYS_SDIO0_RST			 19
++#define GPOUT_SYS_UART0_TX			 20
++#define GPOUT_SYS_HIFI4_JTAG_TDO		 21
++#define GPOUT_SYS_JTAG_TDO			 22
++#define GPOUT_SYS_PDM_MCLK			 23
++#define GPOUT_SYS_PWM_CHANNEL0			 24
++#define GPOUT_SYS_PWM_CHANNEL1			 25
++#define GPOUT_SYS_PWM_CHANNEL2			 26
++#define GPOUT_SYS_PWM_CHANNEL3			 27
++#define GPOUT_SYS_PWMDAC_LEFT			 28
++#define GPOUT_SYS_PWMDAC_RIGHT			 29
++#define GPOUT_SYS_SPI0_CLK			 30
++#define GPOUT_SYS_SPI0_FSS			 31
++#define GPOUT_SYS_SPI0_TXD			 32
++#define GPOUT_SYS_GMAC_PHYCLK			 33
++#define GPOUT_SYS_I2SRX_BCLK			 34
++#define GPOUT_SYS_I2SRX_LRCK			 35
++#define GPOUT_SYS_I2STX0_BCLK			 36
++#define GPOUT_SYS_I2STX0_LRCK			 37
++#define GPOUT_SYS_MCLK				 38
++#define GPOUT_SYS_TDM_CLK			 39
++#define GPOUT_SYS_TDM_SYNC			 40
++#define GPOUT_SYS_TDM_TXD			 41
++#define GPOUT_SYS_TRACE_DATA0			 42
++#define GPOUT_SYS_TRACE_DATA1			 43
++#define GPOUT_SYS_TRACE_DATA2			 44
++#define GPOUT_SYS_TRACE_DATA3			 45
++#define GPOUT_SYS_TRACE_REF			 46
++#define GPOUT_SYS_CAN1_STBY			 47
++#define GPOUT_SYS_CAN1_TST_NEXT_BIT		 48
++#define GPOUT_SYS_CAN1_TST_SAMPLE_POINT	 49
++#define GPOUT_SYS_CAN1_TXD			 50
++#define GPOUT_SYS_I2C1_CLK			 51
++#define GPOUT_SYS_I2C1_DATA			 52
++#define GPOUT_SYS_SDIO1_BACK_END_POWER		 53
++#define GPOUT_SYS_SDIO1_CARD_POWER_EN		 54
++#define GPOUT_SYS_SDIO1_CLK			 55
++#define GPOUT_SYS_SDIO1_CMD_OD_PULLUP_EN	 56
++#define GPOUT_SYS_SDIO1_CMD			 57
++#define GPOUT_SYS_SDIO1_DATA0			 58
++#define GPOUT_SYS_SDIO1_DATA1			 59
++#define GPOUT_SYS_SDIO1_DATA2			 60
++#define GPOUT_SYS_SDIO1_DATA3			 61
++#define GPOUT_SYS_SDIO1_DATA4			 63
++#define GPOUT_SYS_SDIO1_DATA5			 63
++#define GPOUT_SYS_SDIO1_DATA6			 64
++#define GPOUT_SYS_SDIO1_DATA7			 65
++#define GPOUT_SYS_SDIO1_RST			 66
++#define GPOUT_SYS_UART1_RTS			 67
++#define GPOUT_SYS_UART1_TX			 68
++#define GPOUT_SYS_I2STX1_SDO0			 69
++#define GPOUT_SYS_I2STX1_SDO1			 70
++#define GPOUT_SYS_I2STX1_SDO2			 71
++#define GPOUT_SYS_I2STX1_SDO3			 72
++#define GPOUT_SYS_SPI1_CLK			 73
++#define GPOUT_SYS_SPI1_FSS			 74
++#define GPOUT_SYS_SPI1_TXD			 75
++#define GPOUT_SYS_I2C2_CLK			 76
++#define GPOUT_SYS_I2C2_DATA			 77
++#define GPOUT_SYS_UART2_RTS			 78
++#define GPOUT_SYS_UART2_TX			 79
++#define GPOUT_SYS_SPI2_CLK			 80
++#define GPOUT_SYS_SPI2_FSS			 81
++#define GPOUT_SYS_SPI2_TXD			 82
++#define GPOUT_SYS_I2C3_CLK			 83
++#define GPOUT_SYS_I2C3_DATA			 84
++#define GPOUT_SYS_UART3_TX			 85
++#define GPOUT_SYS_SPI3_CLK			 86
++#define GPOUT_SYS_SPI3_FSS			 87
++#define GPOUT_SYS_SPI3_TXD			 88
++#define GPOUT_SYS_I2C4_CLK			 89
++#define GPOUT_SYS_I2C4_DATA			 90
++#define GPOUT_SYS_UART4_RTS			 91
++#define GPOUT_SYS_UART4_TX			 92
++#define GPOUT_SYS_SPI4_CLK			 93
++#define GPOUT_SYS_SPI4_FSS			 94
++#define GPOUT_SYS_SPI4_TXD			 95
++#define GPOUT_SYS_I2C5_CLK			 96
++#define GPOUT_SYS_I2C5_DATA			 97
++#define GPOUT_SYS_UART5_RTS			 98
++#define GPOUT_SYS_UART5_TX			 99
++#define GPOUT_SYS_SPI5_CLK			100
++#define GPOUT_SYS_SPI5_FSS			101
++#define GPOUT_SYS_SPI5_TXD			102
++#define GPOUT_SYS_I2C6_CLK			103
++#define GPOUT_SYS_I2C6_DATA			104
++#define GPOUT_SYS_SPI6_CLK			105
++#define GPOUT_SYS_SPI6_FSS			106
++#define GPOUT_SYS_SPI6_TXD			107
++
++/* aon_iomux dout */
++#define GPOUT_AON_CLK_32K_OUT			2
++#define GPOUT_AON_PTC0_PWM4			3
++#define GPOUT_AON_PTC0_PWM5			4
++#define GPOUT_AON_PTC0_PWM6			5
++#define GPOUT_AON_PTC0_PWM7			6
++#define GPOUT_AON_CLK_GCLK0			7
++#define GPOUT_AON_CLK_GCLK1			8
++#define GPOUT_AON_CLK_GCLK2			9
++
++/* sys_iomux doen */
++#define GPOEN_ENABLE				 0
++#define GPOEN_DISABLE				 1
++#define GPOEN_SYS_HDMI_CEC_SDA			 2
++#define GPOEN_SYS_HDMI_DDC_SCL			 3
++#define GPOEN_SYS_HDMI_DDC_SDA			 4
++#define GPOEN_SYS_I2C0_CLK			 5
++#define GPOEN_SYS_I2C0_DATA			 6
++#define GPOEN_SYS_HIFI4_JTAG_TDO		 7
++#define GPOEN_SYS_JTAG_TDO			 8
++#define GPOEN_SYS_PWM0_CHANNEL0		9
++#define GPOEN_SYS_PWM0_CHANNEL1		10
++#define GPOEN_SYS_PWM0_CHANNEL2		11
++#define GPOEN_SYS_PWM0_CHANNEL3		12
++#define GPOEN_SYS_SPI0_NSSPCTL			13
++#define GPOEN_SYS_SPI0_NSSP			14
++#define GPOEN_SYS_TDM_SYNC			15
++#define GPOEN_SYS_TDM_TXD			16
++#define GPOEN_SYS_I2C1_CLK			17
++#define GPOEN_SYS_I2C1_DATA			18
++#define GPOEN_SYS_SDIO1_CMD			19
++#define GPOEN_SYS_SDIO1_DATA0			20
++#define GPOEN_SYS_SDIO1_DATA1			21
++#define GPOEN_SYS_SDIO1_DATA2			22
++#define GPOEN_SYS_SDIO1_DATA3			23
++#define GPOEN_SYS_SDIO1_DATA4			24
++#define GPOEN_SYS_SDIO1_DATA5			25
++#define GPOEN_SYS_SDIO1_DATA6			26
++#define GPOEN_SYS_SDIO1_DATA7			27
++#define GPOEN_SYS_SPI1_NSSPCTL			28
++#define GPOEN_SYS_SPI1_NSSP			29
++#define GPOEN_SYS_I2C2_CLK			30
++#define GPOEN_SYS_I2C2_DATA			31
++#define GPOEN_SYS_SPI2_NSSPCTL			32
++#define GPOEN_SYS_SPI2_NSSP			33
++#define GPOEN_SYS_I2C3_CLK			34
++#define GPOEN_SYS_I2C3_DATA			35
++#define GPOEN_SYS_SPI3_NSSPCTL			36
++#define GPOEN_SYS_SPI3_NSSP			37
++#define GPOEN_SYS_I2C4_CLK			38
++#define GPOEN_SYS_I2C4_DATA			39
++#define GPOEN_SYS_SPI4_NSSPCTL			40
++#define GPOEN_SYS_SPI4_NSSP			41
++#define GPOEN_SYS_I2C5_CLK			42
++#define GPOEN_SYS_I2C5_DATA			43
++#define GPOEN_SYS_SPI5_NSSPCTL			44
++#define GPOEN_SYS_SPI5_NSSP			45
++#define GPOEN_SYS_I2C6_CLK			46
++#define GPOEN_SYS_I2C6_DATA			47
++#define GPOEN_SYS_SPI6_NSSPCTL			48
++#define GPOEN_SYS_SPI6_NSSP			49
++
++/* aon_iomux doen */
++#define GPOEN_AON_PTC0_OE_N_4			2
++#define GPOEN_AON_PTC0_OE_N_5			3
++#define GPOEN_AON_PTC0_OE_N_6			4
++#define GPOEN_AON_PTC0_OE_N_7			5
++
++/* sys_iomux gin */
++#define GPI_NONE				255
++
++#define GPI_SYS_WAVE511_UART_RX		 0
++#define GPI_SYS_CAN0_RXD			 1
++#define GPI_SYS_USB_OVERCURRENT		 2
++#define GPI_SYS_SPDIF				 3
++#define GPI_SYS_JTAG_RST			 4
++#define GPI_SYS_HDMI_CEC_SDA			 5
++#define GPI_SYS_HDMI_DDC_SCL			 6
++#define GPI_SYS_HDMI_DDC_SDA			 7
++#define GPI_SYS_HDMI_HPD			 8
++#define GPI_SYS_I2C0_CLK			 9
++#define GPI_SYS_I2C0_DATA			10
++#define GPI_SYS_SDIO0_CD			11
++#define GPI_SYS_SDIO0_INT			12
++#define GPI_SYS_SDIO0_WP			13
++#define GPI_SYS_UART0_RX			14
++#define GPI_SYS_HIFI4_JTAG_TCK			15
++#define GPI_SYS_HIFI4_JTAG_TDI			16
++#define GPI_SYS_HIFI4_JTAG_TMS			17
++#define GPI_SYS_HIFI4_JTAG_RST			18
++#define GPI_SYS_JTAG_TDI			19
++#define GPI_SYS_JTAG_TMS			20
++#define GPI_SYS_PDM_DMIC0			21
++#define GPI_SYS_PDM_DMIC1			22
++#define GPI_SYS_I2SRX_SDIN0			23
++#define GPI_SYS_I2SRX_SDIN1			24
++#define GPI_SYS_I2SRX_SDIN2			25
++#define GPI_SYS_SPI0_CLK			26
++#define GPI_SYS_SPI0_FSS			27
++#define GPI_SYS_SPI0_RXD			28
++#define GPI_SYS_JTAG_TCK			29
++#define GPI_SYS_MCLK_EXT			30
++#define GPI_SYS_I2SRX_BCLK			31
++#define GPI_SYS_I2SRX_LRCK			32
++#define GPI_SYS_I2STX0_BCLK			33
++#define GPI_SYS_I2STX0_LRCK			34
++#define GPI_SYS_TDM_CLK			35
++#define GPI_SYS_TDM_RXD			36
++#define GPI_SYS_TDM_SYNC			37
++#define GPI_SYS_CAN1_RXD			38
++#define GPI_SYS_I2C1_CLK			39
++#define GPI_SYS_I2C1_DATA			40
++#define GPI_SYS_SDIO1_CD			41
++#define GPI_SYS_SDIO1_INT			42
++#define GPI_SYS_SDIO1_WP			43
++#define GPI_SYS_SDIO1_CMD			44
++#define GPI_SYS_SDIO1_DATA0			45
++#define GPI_SYS_SDIO1_DATA1			46
++#define GPI_SYS_SDIO1_DATA2			47
++#define GPI_SYS_SDIO1_DATA3			48
++#define GPI_SYS_SDIO1_DATA4			49
++#define GPI_SYS_SDIO1_DATA5			50
++#define GPI_SYS_SDIO1_DATA6			51
++#define GPI_SYS_SDIO1_DATA7			52
++#define GPI_SYS_SDIO1_STRB			53
++#define GPI_SYS_UART1_CTS			54
++#define GPI_SYS_UART1_RX			55
++#define GPI_SYS_SPI1_CLK			56
++#define GPI_SYS_SPI1_FSS			57
++#define GPI_SYS_SPI1_RXD			58
++#define GPI_SYS_I2C2_CLK			59
++#define GPI_SYS_I2C2_DATA			60
++#define GPI_SYS_UART2_CTS			61
++#define GPI_SYS_UART2_RX			62
++#define GPI_SYS_SPI2_CLK			63
++#define GPI_SYS_SPI2_FSS			64
++#define GPI_SYS_SPI2_RXD			65
++#define GPI_SYS_I2C3_CLK			66
++#define GPI_SYS_I2C3_DATA			67
++#define GPI_SYS_UART3_RX			68
++#define GPI_SYS_SPI3_CLK			69
++#define GPI_SYS_SPI3_FSS			70
++#define GPI_SYS_SPI3_RXD			71
++#define GPI_SYS_I2C4_CLK			72
++#define GPI_SYS_I2C4_DATA			73
++#define GPI_SYS_UART4_CTS			74
++#define GPI_SYS_UART4_RX			75
++#define GPI_SYS_SPI4_CLK			76
++#define GPI_SYS_SPI4_FSS			77
++#define GPI_SYS_SPI4_RXD			78
++#define GPI_SYS_I2C5_CLK			79
++#define GPI_SYS_I2C5_DATA			80
++#define GPI_SYS_UART5_CTS			81
++#define GPI_SYS_UART5_RX			82
++#define GPI_SYS_SPI5_CLK			83
++#define GPI_SYS_SPI5_FSS			84
++#define GPI_SYS_SPI5_RXD			85
++#define GPI_SYS_I2C6_CLK			86
++#define GPI_SYS_I2C6_DATA			87
++#define GPI_SYS_SPI6_CLK			88
++#define GPI_SYS_SPI6_FSS			89
++#define GPI_SYS_SPI6_RXD			90
++
++/* aon_iomux gin */
++#define GPI_AON_PMU_GPIO_WAKEUP_0		0
++#define GPI_AON_PMU_GPIO_WAKEUP_1		1
++#define GPI_AON_PMU_GPIO_WAKEUP_2		2
++#define GPI_AON_PMU_GPIO_WAKEUP_3		3
++
++#endif
+--- /dev/null
++++ b/include/dt-bindings/reset/starfive-jh7110.h
+@@ -0,0 +1,183 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++/*
++ * Copyright (C) 2022 StarFive Technology Co., Ltd.
++ *
++ * Author: Yanhong Wang <yanhong.wang@starfivetech.com>
++ */
++
++#ifndef __DT_BINDINGS_RESET_STARFIVE_JH7110_H__
++#define __DT_BINDINGS_RESET_STARFIVE_JH7110_H__
++
++/* SYSCRG resets */
++#define JH7110_SYSRST_JTAG2APB			0
++#define JH7110_SYSRST_SYSCON			1
++#define JH7110_SYSRST_IOMUX			2
++#define JH7110_SYSRST_BUS			3
++#define JH7110_SYSRST_DEBUG			4
++#define JH7110_SYSRST_CORE0			5
++#define JH7110_SYSRST_CORE1			6
++#define JH7110_SYSRST_CORE2			7
++#define JH7110_SYSRST_CORE3			8
++#define JH7110_SYSRST_CORE4			9
++#define JH7110_SYSRST_CORE0_ST			10
++#define JH7110_SYSRST_CORE1_ST			11
++#define JH7110_SYSRST_CORE2_ST			12
++#define JH7110_SYSRST_CORE3_ST			13
++#define JH7110_SYSRST_CORE4_ST			14
++#define JH7110_SYSRST_TRACE0			15
++#define JH7110_SYSRST_TRACE1			16
++#define JH7110_SYSRST_TRACE2			17
++#define JH7110_SYSRST_TRACE3			18
++#define JH7110_SYSRST_TRACE4			19
++#define JH7110_SYSRST_TRACE_COM		20
++#define JH7110_SYSRST_GPU_APB			21
++#define JH7110_SYSRST_GPU_DOMA			22
++#define JH7110_SYSRST_NOC_BUS_APB_BUS		23
++#define JH7110_SYSRST_NOC_BUS_AXICFG0_AXI	24
++#define JH7110_SYSRST_NOC_BUS_CPU_AXI		25
++#define JH7110_SYSRST_NOC_BUS_DISP_AXI		26
++#define JH7110_SYSRST_NOC_BUS_GPU_AXI		27
++#define JH7110_SYSRST_NOC_BUS_ISP_AXI		28
++#define JH7110_SYSRST_NOC_BUS_DDRC		29
++#define JH7110_SYSRST_NOC_BUS_STG_AXI		30
++#define JH7110_SYSRST_NOC_BUS_VDEC_AXI		31
++
++#define JH7110_SYSRST_NOC_BUS_VENC_AXI		32
++#define JH7110_SYSRST_AXI_CFG1_DEC_AHB		33
++#define JH7110_SYSRST_AXI_CFG1_DEC_MAIN	34
++#define JH7110_SYSRST_AXI_CFG0_DEC_MAIN	35
++#define JH7110_SYSRST_AXI_CFG0_DEC_MAIN_DIV	36
++#define JH7110_SYSRST_AXI_CFG0_DEC_HIFI4	37
++#define JH7110_SYSRST_DDR_AXI			38
++#define JH7110_SYSRST_DDR_OSC			39
++#define JH7110_SYSRST_DDR_APB			40
++#define JH7110_SYSRST_DOM_ISP_TOP_N		41
++#define JH7110_SYSRST_DOM_ISP_TOP_AXI		42
++#define JH7110_SYSRST_DOM_VOUT_TOP_SRC		43
++#define JH7110_SYSRST_CODAJ12_AXI		44
++#define JH7110_SYSRST_CODAJ12_CORE		45
++#define JH7110_SYSRST_CODAJ12_APB		46
++#define JH7110_SYSRST_WAVE511_AXI		47
++#define JH7110_SYSRST_WAVE511_BPU		48
++#define JH7110_SYSRST_WAVE511_VCE		49
++#define JH7110_SYSRST_WAVE511_APB		50
++#define JH7110_SYSRST_VDEC_JPG_ARB_JPG		51
++#define JH7110_SYSRST_VDEC_JPG_ARB_MAIN	52
++#define JH7110_SYSRST_AXIMEM0_AXI		53
++#define JH7110_SYSRST_WAVE420L_AXI		54
++#define JH7110_SYSRST_WAVE420L_BPU		55
++#define JH7110_SYSRST_WAVE420L_VCE		56
++#define JH7110_SYSRST_WAVE420L_APB		57
++#define JH7110_SYSRST_AXIMEM1_AXI		58
++#define JH7110_SYSRST_AXIMEM2_AXI		59
++#define JH7110_SYSRST_INTMEM			60
++#define JH7110_SYSRST_QSPI_AHB			61
++#define JH7110_SYSRST_QSPI_APB			62
++#define JH7110_SYSRST_QSPI_REF			63
++
++#define JH7110_SYSRST_SDIO0_AHB		64
++#define JH7110_SYSRST_SDIO1_AHB		65
++#define JH7110_SYSRST_GMAC1_AXI		66
++#define JH7110_SYSRST_GMAC1_AHB		67
++#define JH7110_SYSRST_MAILBOX			68
++#define JH7110_SYSRST_SPI0_APB			69
++#define JH7110_SYSRST_SPI1_APB			70
++#define JH7110_SYSRST_SPI2_APB			71
++#define JH7110_SYSRST_SPI3_APB			72
++#define JH7110_SYSRST_SPI4_APB			73
++#define JH7110_SYSRST_SPI5_APB			74
++#define JH7110_SYSRST_SPI6_APB			75
++#define JH7110_SYSRST_I2C0_APB			76
++#define JH7110_SYSRST_I2C1_APB			77
++#define JH7110_SYSRST_I2C2_APB			78
++#define JH7110_SYSRST_I2C3_APB			79
++#define JH7110_SYSRST_I2C4_APB			80
++#define JH7110_SYSRST_I2C5_APB			81
++#define JH7110_SYSRST_I2C6_APB			82
++#define JH7110_SYSRST_UART0_APB		83
++#define JH7110_SYSRST_UART0_CORE		84
++#define JH7110_SYSRST_UART1_APB		85
++#define JH7110_SYSRST_UART1_CORE		86
++#define JH7110_SYSRST_UART2_APB		87
++#define JH7110_SYSRST_UART2_CORE		88
++#define JH7110_SYSRST_UART3_APB		89
++#define JH7110_SYSRST_UART3_CORE		90
++#define JH7110_SYSRST_UART4_APB		91
++#define JH7110_SYSRST_UART4_CORE		92
++#define JH7110_SYSRST_UART5_APB		93
++#define JH7110_SYSRST_UART5_CORE		94
++#define JH7110_SYSRST_SPDIF_APB		95
++
++#define JH7110_SYSRST_PWMDAC_APB		96
++#define JH7110_SYSRST_PDM_DMIC			97
++#define JH7110_SYSRST_PDM_APB			98
++#define JH7110_SYSRST_I2SRX_APB		99
++#define JH7110_SYSRST_I2SRX_BCLK		100
++#define JH7110_SYSRST_I2STX0_APB		101
++#define JH7110_SYSRST_I2STX0_BCLK		102
++#define JH7110_SYSRST_I2STX1_APB		103
++#define JH7110_SYSRST_I2STX1_BCLK		104
++#define JH7110_SYSRST_TDM_AHB			105
++#define JH7110_SYSRST_TDM_CORE			106
++#define JH7110_SYSRST_TDM_APB			107
++#define JH7110_SYSRST_PWM_APB			108
++#define JH7110_SYSRST_WDT_APB			109
++#define JH7110_SYSRST_WDT_CORE			110
++#define JH7110_SYSRST_CAN0_APB			111
++#define JH7110_SYSRST_CAN0_CORE		112
++#define JH7110_SYSRST_CAN0_TIMER		113
++#define JH7110_SYSRST_CAN1_APB			114
++#define JH7110_SYSRST_CAN1_CORE		115
++#define JH7110_SYSRST_CAN1_TIMER		116
++#define JH7110_SYSRST_TIMER_APB		117
++#define JH7110_SYSRST_TIMER0			118
++#define JH7110_SYSRST_TIMER1			119
++#define JH7110_SYSRST_TIMER2			120
++#define JH7110_SYSRST_TIMER3			121
++#define JH7110_SYSRST_INT_CTRL_APB		122
++#define JH7110_SYSRST_TEMP_APB			123
++#define JH7110_SYSRST_TEMP_CORE		124
++#define JH7110_SYSRST_JTAG_CERTIFICATION	125
++
++#define JH7110_SYSRST_END			126
++
++/* AONCRG resets */
++#define JH7110_AONRST_GMAC0_AXI		0
++#define JH7110_AONRST_GMAC0_AHB		1
++#define JH7110_AONRST_AON_IOMUX		2
++#define JH7110_AONRST_PMU_APB			3
++#define JH7110_AONRST_PMU_WKUP			4
++#define JH7110_AONRST_RTC_APB			5
++#define JH7110_AONRST_RTC_CAL			6
++#define JH7110_AONRST_RTC_32K			7
++
++#define JH7110_AONRST_END			8
++
++/* STGCRG resets */
++#define JH7110_STGRST_SYSCON_PRESETN		0
++#define JH7110_STGRST_HIFI4_CORE		1
++#define JH7110_STGRST_HIFI4_AXI		2
++#define JH7110_STGRST_SEC_TOP_HRESETN		3
++#define JH7110_STGRST_E24_CORE			4
++#define JH7110_STGRST_DMA1P_AXI		5
++#define JH7110_STGRST_DMA1P_AHB		6
++#define JH7110_STGRST_USB_AXI			7
++#define JH7110_STGRST_USB_APB			8
++#define JH7110_STGRST_USB_UTMI_APB		9
++#define JH7110_STGRST_USB_PWRUP		10
++#define JH7110_STGRST_PCIE0_MST0		11
++#define JH7110_STGRST_PCIE0_SLV0		12
++#define JH7110_STGRST_PCIE0_SLV		13
++#define JH7110_STGRST_PCIE0_BRG		14
++#define JH7110_STGRST_PCIE0_CORE		15
++#define JH7110_STGRST_PCIE0_APB		16
++#define JH7110_STGRST_PCIE1_MST0		17
++#define JH7110_STGRST_PCIE1_SLV0		18
++#define JH7110_STGRST_PCIE1_SLV		19
++#define JH7110_STGRST_PCIE1_BRG		20
++#define JH7110_STGRST_PCIE1_CORE		21
++#define JH7110_STGRST_PCIE1_APB		22
++
++#define JH7110_STGRST_END			23
++
++#endif /* __DT_BINDINGS_RESET_STARFIVE_JH7110_H__ */

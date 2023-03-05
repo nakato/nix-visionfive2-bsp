@@ -5,6 +5,7 @@
 
   outputs = 
     { nixpkgs
+    , self
     , ...
     }:
     let
@@ -15,12 +16,16 @@
 
       packages.riscv64-linux =
       let
-        VF2LinuxHeadMimimalStatic = pkgs.callPackage ./vf2_linux_mainline_head.nix { };
         # TODO: Make minimal config less minimal outside of the drivers sphere.
+        VF2LinuxHeadMimimalStatic = pkgs.callPackage ./vf2_linux_mainline_head.nix { };
       in
       {
         VF2KernelPackages = VF2LinuxHeadMimimalStatic;
         VF2Kernel = VF2LinuxHeadMimimalStatic.kernel;
+
+        opensbiVisionFive2 = pkgs.callPackage ./opensbi.nix { uboot = self.packages.riscv64-linux.ubootVisionFive2; };
+
+        ubootVisionFive2 = pkgs.callPackage ./uboot.nix { };
       };
     };
 }
