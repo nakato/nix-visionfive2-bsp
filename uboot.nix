@@ -22,7 +22,7 @@ in
       # Basic JH7110 support
       # https://patchwork.ozlabs.org/project/uboot/cover/20230118081132.31403-1-yanhong.wang@starfivetech.com/
       # arch/riscv/Kconfig patch updated for ax25 -> andesv5 change
-      ./patches/uboot-basic-jh7110.mbox
+      ./patches/u-boot/uboot-basic-jh7110.mbox
       # JH7110 PCIe
       # https://patchwork.ozlabs.org/project/uboot/cover/20230223105240.15180-1-minda.chen@starfivetech.com/
       (fetchpatch {
