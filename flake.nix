@@ -17,7 +17,8 @@
       packages.riscv64-linux =
       let
         # TODO: Make minimal config less minimal outside of the drivers sphere.
-        VF2LinuxHeadMimimalStatic = pkgs.callPackage ./vf2_linux_mainline_head.nix { };
+        VF2LinuxHeadMimimalStatic = pkgs.callPackage ./kernel/mainline.nix { };
+
         uboot = pkgs.callPackage ./uboot.nix {
           opensbi = self.packages.riscv64-linux.opensbiVisionFive2;
           spl_tool = self.packages.riscv64-linux.spl_tool;
