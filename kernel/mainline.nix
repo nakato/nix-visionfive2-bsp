@@ -7,8 +7,8 @@
 }:
 let
   src = fetchzip {
-    url = "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-0988a0ea791999ebbf95693f2676381825b05033.tar.gz";
-    hash = "sha256-AzUt9PDXbDFXgyoK5SxuyXP8opHl8hPFX56aXiBOSjs=";
+    url = "https://git.kernel.org/torvalds/t/linux-6.3-rc1.tar.gz";
+    hash = "sha256-t+9z4zooZa6aSQB9YSCF0n8bWwhynH99wMq1bfIG+RE=";
   };
 
   # customPackage closure copied from: nixpkgs/pkgs/top-level/linux-kernels.nix
@@ -154,8 +154,8 @@ let
 
   kernelPackages = customPackage {
     inherit kernelPatches src;
-    modDirVersion = "6.2.0";
-    version = "6.2.0";
+    modDirVersion = "6.3.0-rc1";
+    version = "6.3.0-rc1";
     configfile = copyPathToStore ./vf2_6.3-pre.config;
   };
 in
