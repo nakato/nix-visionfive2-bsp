@@ -1,16 +1,18 @@
 # NixOS Flake for VisionFive 2
 
-Currently provided:
+## Status
+
 * Kernel
   * Based on master after the 6.2 release cycle.
   * Patches source from the [JH7110 Upstream Plan](https://rvspace.org/en/project/JH7110_Upstream_Plan)
   * See README.md in patches directory for details of what is currently pulled in.
 
-Not currently provided:
-* Uboot
-  * Needs default bootcmd to support better handling of dtb modifications for passing hardware specific details, such as RAM size.
-* OpenSBI
-* Scripts to write the above onto system SPI easily.
+* Uboot with OpenSBI
+  * Boots; no boot scripting
+
+## Todo/Issues
+
+* Scripts to write the above onto system SPI/MMC and make SD image.
 
 Issues:
 * 8GB board will boot with 4GB of memory exposed due to how vendor uboot patches on-disk dtb with memory size change.
