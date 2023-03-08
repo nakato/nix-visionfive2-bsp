@@ -19,16 +19,15 @@ in
     inherit version src;
 
     extraPatches = [
-      # Basic JH7110 support
-      # https://patchwork.ozlabs.org/project/uboot/cover/20230118081132.31403-1-yanhong.wang@starfivetech.com/
-      # arch/riscv/Kconfig patch updated for ax25 -> andesv5 change
-      ./patches/u-boot/uboot-basic-jh7110.mbox
-      # JH7110 PCIe
-      # https://patchwork.ozlabs.org/project/uboot/cover/20230223105240.15180-1-minda.chen@starfivetech.com/
+      # Basic JH7110 support v3
+      # https://patchwork.ozlabs.org/project/uboot/cover/20230303032432.7837-1-yanhong.wang@starfivetech.com/
       (fetchpatch {
-        url = "https://patchwork.ozlabs.org/series/343341/mbox/";
-        hash = "sha256-8GTllhw7Nb3bIGQnAkCkKSyz89P3Ut+AGOwRxK+ieB4=";
+        url = "https://patchwork.ozlabs.org/series/344525/mbox/";
+        hash = "sha256-QD0fLd4hdYQhl4iX7MoHWT6O2Qkfcrhg1owtIxrg3Ic=";
       })
+
+      # JH7110 PCIe
+      # Not yet applied: Doesn't apply cleanly with v3 patch above, and not important to me yet.
     ];
 
     # StarFive need to add support to binman, use specific targets so build doesn't fail at binman.
