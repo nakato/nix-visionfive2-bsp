@@ -2,6 +2,8 @@
 , fetchpatch
 , fetchurl
 , ubootTools
+, opensbi
+, spl_tool
 , ...
 }:
 let
@@ -31,9 +33,14 @@ in
     ];
 
     # StarFive need to add support to binman, use specific targets so build doesn't fail at binman.
-    extraMakeFlags = [ "u-boot.bin" "u-boot.dtb" "spl/u-boot-spl.bin" ];
+    # extraMakeFlags = [ "u-boot.bin" "u-boot.dtb" "spl/u-boot-spl.bin" ];
+    extraMakeFlags = [ "OPENSBI=${opensbi}/share/opensbi/lp64/generic/firmware/fw_dynamic.bin" ];
 
-    filesToInstall = [ "u-boot.bin" "u-boot.dtb" "spl/u-boot-spl.bin" ];
+    postBuild = ''
+      ${spl_tool}/bin/spl_tool -c -f spl/u-boot-spl.bin
+    '';
+
+    filesToInstall = [ "u-boot.itb" "spl/u-boot-spl.bin.normal.out" ];
   };
 
   ubootTools = ubootTools.overrideAttrs (oldAttrs: {

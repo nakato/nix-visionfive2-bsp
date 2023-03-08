@@ -18,25 +18,21 @@
       let
         # TODO: Make minimal config less minimal outside of the drivers sphere.
         VF2LinuxHeadMimimalStatic = pkgs.callPackage ./vf2_linux_mainline_head.nix { };
-        uboot = pkgs.callPackage ./uboot.nix { };
+        uboot = pkgs.callPackage ./uboot.nix {
+          opensbi = self.packages.riscv64-linux.opensbiVisionFive2;
+          spl_tool = self.packages.riscv64-linux.spl_tool;
+        };
       in
       {
         VF2KernelPackages = VF2LinuxHeadMimimalStatic;
         VF2Kernel = VF2LinuxHeadMimimalStatic.kernel;
 
-        opensbiVisionFive2 = pkgs.callPackage ./opensbi.nix { uboot = self.packages.riscv64-linux.ubootVisionFive2; };
+        opensbiVisionFive2 = pkgs.callPackage ./opensbi.nix { };
 
 	spl_tool = pkgs.callPackage ./spl_tool.nix { };
 
         ubootVisionFive2 = uboot.visionFive2;
         ubootTools = uboot.ubootTools;
-
-        visionfive2_firmware = pkgs.callPackage ./bootfirmware.nix {
-          opensbi = self.packages.riscv64-linux.opensbiVisionFive2;
-          spl_tool = self.packages.riscv64-linux.spl_tool;
-          uboot = self.packages.riscv64-linux.ubootVisionFive2;
-          ubootTools = self.packages.riscv64-linux.ubootTools;
-        };
       };
     };
 }

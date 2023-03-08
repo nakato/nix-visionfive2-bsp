@@ -1,6 +1,5 @@
 { fetchFromGitHub
 , opensbi
-, uboot
 , ...
 }:
 let
@@ -15,10 +14,7 @@ let
 
     # See https://github.com/starfive-tech/VisionFive2/blob/b5c6a9d6b49453f6aee49a5e30175f45dd32b3b7/Makefile#L279
     # Is this a temporary limitation, or a permanent flag that needs to be added to nixpkgs?
-    makeFlags = oldAttrs.makeFlags ++ [ "FW_TEXT_START=0x40000000" ];
+    makeFlags = oldAttrs.makeFlags ++ [ "FW_TEXT_START=0x40000000" "FW_OPTIONS=0" ];
   });
 in
-opensbiHead.override {
-  withPayload = "${uboot}/u-boot.bin";
-  withFDT = "${uboot}/u-boot.dtb";
-}
+opensbiHead
