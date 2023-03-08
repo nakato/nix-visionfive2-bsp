@@ -30,6 +30,13 @@
 
         ubootVisionFive2 = uboot.visionFive2;
         ubootTools = uboot.ubootTools;
+
+        visionfive2_firmware = pkgs.callPackage ./bootfirmware.nix {
+          opensbi = self.packages.riscv64-linux.opensbiVisionFive2;
+          spl_tool = self.packages.riscv64-linux.spl_tool;
+          uboot = self.packages.riscv64-linux.ubootVisionFive2;
+          ubootTools = self.packages.riscv64-linux.ubootTools;
+        };
       };
     };
 }
