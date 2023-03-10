@@ -3,22 +3,30 @@
 ## Status
 
 * Kernel
-  * Based on master after the 6.2 release cycle.
+  * Based on 6.3-rc1
   * Patches source from the [JH7110 Upstream Plan](https://rvspace.org/en/project/JH7110_Upstream_Plan)
   * See README.md in patches directory for details of what is currently pulled in.
 
 * Uboot with OpenSBI
-  * Boots; no boot scripting
+  * Uses u-boot default boot scripts
 
-## Todo/Issues
+* NixOS SD-Card image
+  * Boot bug, deadlocks during boot.
 
-* Scripts to write the above onto system SPI/MMC and make SD image.
+## Todo
 
-Issues:
+* Test uboot on SPI
+* Scripts to write uboot to SPI
+* Scripts to update uboot on MMC without needing to do so manually or create sd-image from scratch.
+* Scripts to make the Kernel install on not-nixos.
+
+## Issues
+
 * 8GB board will boot with 4GB of memory exposed due to how vendor uboot patches on-disk dtb with memory size change.
   * Workaround: Write patch to modify memory@40000000 `reg = <0x0 0x40000000 0x2 0x0>;`
   * Solution: Build uboot default boot command to patch the dtb being loaded by extlinux.conf dtbdir in memory.
     * Do not write the patched dtb back to the boot partition after editing it.  **frown**
+  * TODO: Confirm this issue is still present with upstream uboot.
 
 
 ## Usage
@@ -40,11 +48,7 @@ Issues:
         modules = [
           ...
           {
-            boot.kernelPackages = vf2Bsp.packages.riscv64-linux.VF2KernelPackages;
-            # NOTICE: Vendor uboot looks for uboot env file at <BOOTPART>/boot/uEnv.txt and only looks for
-            # "jh7110-visionfive-v2.dtb" by default. On a booted system this is `/boot/boot/uEnv.txt`
-            # You want uboot to load jh7110-starfive-visionfive-2-v1.2a.dtb if your board has 1x1GbE and 1xFastEthernet.
-            # You want uboot to load jh7110-starfive-visionfive-2-v1.3b.dtb if your board has 2x1GbE.
+            boot.kernelPackages = vf2Bsp.packages.riscv64-linux.linuxPackages_visionfive2;
             hardware.deviceTree.filter = "jh7110-starfive-visionfive-2-*.dtb";
           }
         ];
