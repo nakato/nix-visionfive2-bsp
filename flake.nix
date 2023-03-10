@@ -25,8 +25,9 @@
         };
       in
       {
-        VF2KernelPackages = VF2LinuxHeadMimimalStatic;
-        VF2Kernel = VF2LinuxHeadMimimalStatic.kernel;
+        linuxPackages_visionfive2 = VF2LinuxHeadMimimalStatic;
+        # Convenience alias to kernel derivation
+        linuxKernel_visionfive2 = VF2LinuxHeadMimimalStatic.kernel;
 
         opensbiVisionFive2 = pkgs.callPackage ./opensbi.nix { };
 
@@ -43,7 +44,7 @@
           modules = [
             ./sd-image.nix
             ({self, lib, config, ...}: {
-              boot.kernelPackages = self.packages.riscv64-linux.VF2KernelPackages;
+              boot.kernelPackages = self.packages.riscv64-linux.linuxPackages_visionfive2;
               # Can't include modules we don't have into initrd, so force these empty, we can boot without modules.
               # Remove once kernel building with real config.
               boot.initrd.availableKernelModules = lib.mkForce [];
